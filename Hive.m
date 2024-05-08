@@ -12,9 +12,10 @@ Swarm = Swarm(scenarioData);
 Swarm.mountGPS();
 
 % Create environment
-createEnvironment(Swarm.simulationScene);
-ax = show3D(Swarm.simulationScene);
+sceneAxes = createEnvironment(Swarm.simulationScene);
+
 setup(Swarm.simulationScene)
+
 while advance(Swarm.simulationScene)
 
     % Update sensor readings
@@ -24,7 +25,7 @@ while advance(Swarm.simulationScene)
     Swarm.updateNavData();
 
     % Visualize the scenario
-    show3D(Swarm.simulationScene,"Parent",ax,"FastUpdate",true);
+    show3D(Swarm.simulationScene,Parent=sceneAxes);
     drawnow limitrate
 
     if Swarm.checkMotionEnded
