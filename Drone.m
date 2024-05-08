@@ -32,8 +32,6 @@ classdef Drone < handle
         gpsIsUpdated
         gpsSampleTime
 
-        nbSamples
-
         % Sensor Models
         GPS
         GPSsensor
@@ -58,26 +56,32 @@ classdef Drone < handle
                 Trajectory=uavFlightData.Trajectory);
 
             % Initialize motion
+            % Read uavMotionVector (vector with 16 elements) and uavLLAVector 
             [self.uavMotionVector,self.uavLLAVector] = read(self.uavPlatform);
-            self.uavPosition = self.uavMotionVector(1,1:3);
-            self.uavVelocity = self.uavMotionVector(1,4:6);
+            
+            self.uavPosition = self.uavMotionVector(1,1:3); % Assign uavPosition in local frame (vector with 3 elements)
+            self.uavVelocity = self.uavMotionVector(1,4:6); % Assign uavVelocity (vector with 3 elements)
             self.uavOrientation = self.uavMotionVector(1,10:13); % Quaternion vector for orientation
 
-            self.uavLatitude = self.uavLLAVector(1);
-            self.uavLongtitude = self.uavLLAVector(2);
-            self.uavAltitude = self.uavLLAVector(3);
+            self.uavLatitude = self.uavLLAVector(1); % Assign uavLatitude (real value)
+            self.uavLongtitude = self.uavLLAVector(2); % Assign uavLongtitude (real value)
+            self.uavAltitude = self.uavLLAVector(3); % Assign uavAltitude (real value)
 
+            % Transform orientation from quaternion to uavYaw, uawPitch,
+            % uavRoll (real values)
             self.transformOrientation();
-            self.calculateGroundSpeed();
+
+            % Calculate uavGroundspeed based on 3D velocities from
+            % uavVelocity
+            self.calculateGroundspeed();
 
             % Set up platform mesh. Add a rotation to orient the mesh to the UAV body frame.
             updateMesh(self.uavPlatform,"quadrotor",{10},[1 0 0],self.uavPosition,self.uavOrientation);
-
-
         end
         %%%%%%%%%% End Constructor %%%%%%%%%%%%
 
-        %% Function which is responsible for defininf GPS model and mounting GPS sensor on UAV
+        %% Function which is responsible for definining GPS model and mounting GPS sensor on UAV
+        %  Output: GPS, GPSsensor
         function mountGPS(self)
             self.GPS = gpsSensor('SampleRate',2,'PositionInputFormat','Local','ReferenceLocation',[0 0 0]);
             self.GPSsensor = uavSensor('GPS',self.uavPlatform,self.GPS,'MountingLocation',[0 0.1 0],'UpdateRate',1);
@@ -92,7 +96,7 @@ classdef Drone < handle
         end
 
         %% Function which is responsible for transforming true orientation of
-        %% the UAV from quaternion (uavOrientation) to yaw, pitch, roll angles
+        %  the UAV from quaternion (uavOrientation) to yaw, pitch, roll angles
         %  Output: uavYaw, uawPitch, uavRoll
         function transformOrientation(self)
             [self.uavYaw, self.uavPitch, self.uavRoll] = ...
@@ -100,9 +104,9 @@ classdef Drone < handle
         end
 
         %% Function which is resposnible for calculating true groudspeed of 
-        %% the UAV from velocities components in xyz dimensions
-        %  Output: uavGroundspeed
-        function calculateGroundSpeed(self)
+        %  the UAV from velocities components in xyz dimensions
+        %  Output: uavGroundspeed* 
+        function calculateGroundspeed(self)
             self.uavGroundspeed = sqrt(sum(self.uavVelocity.^2));
         end
 
@@ -115,14 +119,14 @@ classdef Drone < handle
             [self.uavMotionVector,self.uavLLAVector] = read(self.uavPlatform);
             self.uavPosition = self.uavMotionVector(1,1:3);
             self.uavVelocity = self.uavMotionVector(1,4:6);
-            self.uavOrientation = self.uavMotionVector(1,10:13); % Quaternion vector for orientation
+            self.uavOrientation = self.uavMotionVector(1,10:13);
 
             self.uavLatitude = self.uavLLAVector(1);
             self.uavLongtitude = self.uavLLAVector(2);
             self.uavAltitude = self.uavLLAVector(3);
 
             self.transformOrientation();
-            self.calculateGroundSpeed();
+            self.calculateGroundspeed();
         end
     end
 end
