@@ -6,59 +6,160 @@ classdef Swarm < handle
         nbAgents % size of the above vector
         simulationScene % Scenario in which Swarm operates
         scenarioData % Flight data of the swarm
+        trueLLAPositions % Vector containing LLA positions of each UAV
+        neighbors % Cell array to hold neighbors' indices for each UAV
     end
 
     methods
         %%%%%%%%%% Constructor %%%%%%%%%%%%
         function self = Swarm(scenarioData)
-            
+
             self.scenarioData = scenarioData;
             self.UAVs = [];
+            self.trueLLAPositions = [];
             self.nbAgents = length(scenarioData.Platforms);
             self.simulationScene = uavScenario(UpdateRate=scenarioData.UpdateRate, ...
                 ReferenceLocation=scenarioData.ReferenceLocation,...
                 StopTime=scenarioData.StopTime);
-            
+
+            swarmParameters = struct();
+            swarmParameters.nbAgents = self.nbAgents;
+
             % Initialize UAVs
-            for i = 1:self.nbAgents
-                uavFlightData = scenarioData.Platforms(i);
-                UAV = Drone(self.simulationScene,uavFlightData);
+            for uavIndex = 1:self.nbAgents
+                uavFlightData = scenarioData.Platforms(uavIndex);
+                UAV = Drone(self.simulationScene,uavFlightData,swarmParameters);
                 self.UAVs = [self.UAVs UAV];
+                self.trueLLAPositions = [self.trueLLAPositions UAV.uavLLAVector];
             end
+
+            self.neighbors = cell(1, self.nbAgents);
+            self.updateAllNeighbors(); % Initial neighbors computation
         end
         %%%%%%%%%% End Constructor %%%%%%%%%%%%
-        
-        %% Function which is responsible for definining GPS model and 
+
+        %% Function which is responsible for definining GPS model and
         %  mounting GPS sensor on each UAV in the Swarm
         function mountGPS(self)
-            for i = 1:self.nbAgents
-                self.UAVs(i).mountGPS();
+            for uavIndex = 1:self.nbAgents
+                self.UAVs(uavIndex).mountGPS();
             end
         end
-       
-        %% Function which is responsible for reading GSP sensor measurements 
+
+        %% Function which is responsible for reading GSP sensor measurements
         %  from each UAV in the Swarm
         function readGPS(self)
-            for i = 1:self.nbAgents
-                self.UAVs(i).readGPS();
+            for uavIndex = 1:self.nbAgents
+                self.UAVs(uavIndex).readGPS();
             end
         end
 
         %% Function responsible for updating true data of the UAVs in a timestep
         function updateNavData(self)
-            for i = 1:self.nbAgents
-                self.UAVs(i).updateNavData();
+            for uavIndex = 1:self.nbAgents
+                self.UAVs(uavIndex).updateNavData();
             end
         end
 
-        %% Function for checking if the motion of the UAVs ended (based on 
+        %% Function for checking if the motion of the UAVs ended (based on
         %  the motion of the single, chosen UAV)
         function motionEnded = checkMotionEnded(self)
             if self.simulationScene.CurrentTime >= self.UAVs(1).uavPlatform.Trajectory.TimeOfArrival(end)
                 motionEnded = 1;
-            else 
+            else
                 motionEnded = 0;
             end
         end
+
+        %% Function which updates the neighbors' information for all UAVs
+        function updateAllNeighbors(self)
+            for uavIndex = 1:self.nbAgents
+                self.neighbors{uavIndex} = self.checkVicinity(uavIndex, 10);
+            end
+        end
+
+        %% Function which finds neighbors within maxRange of the specified UAV
+        % uavIndex: Index of the UAV to check vicinity for (1-based index)
+        % maxRange: Maximum range to consider another UAV as a neighbor
+        function neighbors = checkVicinity(self, uavIndex, maxRange)
+
+            % Initialize neighbors vector
+            neighbors = [];
+
+            % Coordinates of the UAV to check
+            x = self.trueLLAPositions((uavIndex-1)*3 + 1);
+            y = self.trueLLAPositions((uavIndex-1)*3 + 2);
+            z = self.trueLLAPositions((uavIndex-1)*3 + 3);
+
+            % Loop through all other UAVs to find neighbors within maxRange
+            for i = 1:(length(self.trueLLAPositions) / 3)
+                if i ~= uavIndex
+                    % Coordinates of the other UAV
+                    x_other = self.trueLLAPositions((i-1)*3 + 1);
+                    y_other = self.trueLLAPositions((i-1)*3 + 2);
+                    z_other = self.trueLLAPositions((i-1)*3 + 3);
+
+                    % Calculate Euclidean distance
+                    distance = sqrt((x - x_other)^2 + (y - y_other)^2 + (z - z_other)^2);
+
+                    % Check if within maxRange
+                    if distance <= maxRange
+                        neighbors = [neighbors, i];
+                    end
+                end
+            end
+        end
+
+        %% Function which simulates UWB range measurements to neighbors
+        % uavIndex: Index of the UAV conducting the measurements (1-based index)
+        % measurementError: Standard deviation of the measurement error
+        function ranges = conductRangeMeasurements(self, uavIndex, measurementError)
+
+            % Get neighbors from the neighbors cell array
+            selfNeighbors = self.neighbors{uavIndex};
+
+            % Initialize range measurements vector
+            ranges = zeros(1, length(selfNeighbors));
+
+            % Coordinates of the UAV conducting the measurements
+            x = self.trueLLAPositions((uavIndex-1)*3 + 1);
+            y = self.trueLLAPositions((uavIndex-1)*3 + 2);
+            z = self.trueLLAPositions((uavIndex-1)*3 + 3);
+
+            % Calculate the range to each neighbor
+            for i = 1:length(selfNeighbors)
+                neighborIndex = selfNeighbors(i);
+
+                % Coordinates of the neighbor UAV
+                x_other = self.trueLLAPositions((neighborIndex-1)*3 + 1);
+                y_other = self.trueLLAPositions((neighborIndex-1)*3 + 2);
+                z_other = self.trueLLAPositions((neighborIndex-1)*3 + 3);
+
+                % Calculate true range
+                trueRange = sqrt((x - x_other)^2 + (y - y_other)^2 + (z - z_other)^2);
+
+                % Add measurement noise
+                noisyRange = trueRange + measurementError * randn();
+
+                % Store the noisy range
+                ranges(i) = noisyRange;
+            end
+        end
+
+        %% Function which updates the ground truth position of a specified UAV
+        % uavIndex: Index of the UAV to update (1-based index)
+        % newPosition: New [x, y, z] position of the UAV
+        function updateTrueLLAPositions(self)
+            for uavIndex = 1:self.nbAgents
+                newPosition = self.UAVs(uavIndex).uavLLAVector;
+                % Update the ground truth positions
+                self.trueLLAPositions((uavIndex-1)*3 + 1) = newPosition(1);
+                self.trueLLAPositions((uavIndex-1)*3 + 2) = newPosition(2);
+                self.trueLLAPositions((uavIndex-1)*3 + 3) = newPosition(3);
+            end
+            % Update neighbors' information for all UAVs
+            self.updateAllNeighbors();
+        end
     end
 end
+
