@@ -7,6 +7,7 @@ classdef Swarm < handle
         simulationScene % Scenario in which Swarm operates
         scenarioData % Flight data of the swarm
         trueLLAPositions % Vector containing LLA positions of each UAV
+        truePositions  % Vector containing true scenario positions of each UAV
         neighbors % Cell array to hold neighbors' indices for each UAV
     end
 
@@ -17,6 +18,7 @@ classdef Swarm < handle
             self.scenarioData = scenarioData;
             self.UAVs = [];
             self.trueLLAPositions = [];
+            self.truePositions = [];
             self.nbAgents = length(scenarioData.Platforms);
             self.simulationScene = uavScenario(UpdateRate=scenarioData.UpdateRate, ...
                 ReferenceLocation=scenarioData.ReferenceLocation,...
@@ -31,6 +33,7 @@ classdef Swarm < handle
                 UAV = Drone(self.simulationScene,uavFlightData,swarmParameters);
                 self.UAVs = [self.UAVs UAV];
                 self.trueLLAPositions = [self.trueLLAPositions UAV.uavLLAVector];
+                self.truePositions = [self.truePositions UAV.uavPosition];
             end
 
             self.neighbors = cell(1, self.nbAgents);
@@ -144,11 +147,12 @@ classdef Swarm < handle
                 % Store the noisy range
                 ranges(i) = noisyRange;
             end
+            self.UAVs(uavIndex).uwbRanges = ranges;
         end
 
-        %% Function which updates the ground truth position of a specified UAV
+        %% Function which updates true position vector of a specified UAV
         % uavIndex: Index of the UAV to update (1-based index)
-        % newPosition: New [x, y, z] position of the UAV
+        % newPosition: New [Lat Long Alt] position of the UAV
         function updateTrueLLAPositions(self)
             for uavIndex = 1:self.nbAgents
                 newPosition = self.UAVs(uavIndex).uavLLAVector;
@@ -159,6 +163,18 @@ classdef Swarm < handle
             end
             % Update neighbors' information for all UAVs
             self.updateAllNeighbors();
+        end
+
+        %% Function which applies the EKF update based on GPS and UWB measurements
+        % GPS and UWB measurements are carried out before and passed as an
+        % input
+        function extendedKalmanFilter(self)
+            self.readGPS();
+            for uavIndex = 1:self.nbAgents
+                gpsMeasurements = self.UAVs(uavIndex).gpsPosition';
+                uwbMeasurements = self.conductRangeMeasurements(uavIndex,0);
+                self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements);
+            end
         end
     end
 end

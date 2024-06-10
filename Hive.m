@@ -4,7 +4,6 @@ scenarioData = loadScenario("ScenarioTest.mat");
 
 %% Parameteres
 
-
 % Initialize Swarm
 Swarm = Swarm(scenarioData);
 
@@ -18,18 +17,26 @@ setup(Swarm.simulationScene)
 
 while advance(Swarm.simulationScene)
 
-    % Update sensor readings
-    Swarm.readGPS();
-
+    % Updates all sensor readings based on latest states of all platforms
+    % in the scenario (buil-in function)
     updateSensors(Swarm.simulationScene);
+           
+    % Assign current values to the navigational variables of UAVs
     Swarm.updateNavData();
 
-    % Visualize the scenario
-    show3D(Swarm.simulationScene,Parent=sceneAxes);
-    drawnow limitrate
+    % Update Swarm's true postition vector [Lat Long Alt] and conduct
+    % vicinity ispection (find neighbors)
+    Swarm.updateTrueLLAPositions();
+    
+    % Conduct estimation in every UAV using EKF filter - GPS and UWB
+    % measurements are carried out and passed as input
+    Swarm.extendedKalmanFilter();
 
     if Swarm.checkMotionEnded
         break;
     end
 
+    % Visualize the scenario
+    show3D(Swarm.simulationScene,Parent=sceneAxes);
+    drawnow limitrate
 end
