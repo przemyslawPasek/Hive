@@ -153,13 +153,18 @@ classdef Swarm < handle
         %% Function which updates true position vector of a specified UAV
         % uavIndex: Index of the UAV to update (1-based index)
         % newPosition: New [Lat Long Alt] position of the UAV
-        function updateTrueLLAPositions(self)
+        function updateTruePositions(self)
             for uavIndex = 1:self.nbAgents
-                newPosition = self.UAVs(uavIndex).uavLLAVector;
+                % Update the true positions [Lat Long Alt]
+                newLLAPosition = self.UAVs(uavIndex).uavLLAVector;
+                self.trueLLAPositions((uavIndex-1)*3 + 1) = newLLAPosition(1);
+                self.trueLLAPositions((uavIndex-1)*3 + 2) = newLLAPosition(2);
+                self.trueLLAPositions((uavIndex-1)*3 + 3) = newLLAPosition(3);
                 % Update the ground truth positions
-                self.trueLLAPositions((uavIndex-1)*3 + 1) = newPosition(1);
-                self.trueLLAPositions((uavIndex-1)*3 + 2) = newPosition(2);
-                self.trueLLAPositions((uavIndex-1)*3 + 3) = newPosition(3);
+                newPosition = self.UAVs(uavIndex).uavPosition;
+                self.truePositions((uavIndex-1)*3 + 1) = newPosition(1);
+                self.truePositions((uavIndex-1)*3 + 2) = newPosition(2);
+                self.truePositions((uavIndex-1)*3 + 3) = newPosition(3);
             end
             % Update neighbors' information for all UAVs
             self.updateAllNeighbors();

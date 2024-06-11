@@ -26,7 +26,7 @@ while advance(Swarm.simulationScene)
 
     % Update Swarm's true postition vector [Lat Long Alt] and conduct
     % vicinity ispection (find neighbors)
-    Swarm.updateTrueLLAPositions();
+    Swarm.updateTruePositions();
     
     % Conduct estimation in every UAV using EKF filter - GPS and UWB
     % measurements are carried out and passed as input
