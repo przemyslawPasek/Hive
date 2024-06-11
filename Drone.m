@@ -7,6 +7,7 @@ classdef Drone < handle
         uavFlightData % UAV platform data in scenario
         uavIndex % Number of the UAV in the swarm
         uavSI % The starting index for the UAV's coordinates (SI - Starting Index)
+        swarm % Reference to the Swarm object containing all UAVs
         swarmParameters
 
         % UAV State
@@ -35,7 +36,7 @@ classdef Drone < handle
         gpsSampleTime
 
         % Ranges to the UAV neighbors acquired with UWB sensor [r1 r2 ...]
-        uwbRanges 
+        uwbRanges
 
         % Sensor Models
         GPS
@@ -47,6 +48,10 @@ classdef Drone < handle
         uavStateVector
         uavCovarianceMatrix
 
+        % Fused state variables
+        uavStateVectorCI
+        uavCovarianceMatrixCI
+
         % Kalman Filter
         ekf
 
@@ -56,10 +61,11 @@ classdef Drone < handle
 
     methods
         %%%%%%%%%% Constructor %%%%%%%%%%%%
-        function self = Drone(simulationScene,uavFlightData,swarmParameters)
+        function self = Drone(simulationScene,uavFlightData,swarm,swarmParameters)
             self.uavFlightData = uavFlightData;
             self.uavIndex = str2double(regexp(uavFlightData.Name, '\d+', 'match'));
             self.uavSI = (self.uavIndex - 1) * 3 + 1;
+            self.swarm = swarm;
             self.swarmParameters = swarmParameters;
 
             % Initialize UAV platform
@@ -154,7 +160,7 @@ classdef Drone < handle
 
             F = eye(length(self.uavStateVector));
             Q = 0.01 * eye(length(self.uavStateVector));
-           
+
             %%%%%%%%%% Prediction %%%%%%%%%%%%
             uavPredictedStateVector = F * self.uavStateVector;
             uavPredictedCovarianceMatrix = F * self.uavCovarianceMatrix * F' + Q;
@@ -221,6 +227,83 @@ classdef Drone < handle
 
                 rowIndex = rowIndex + 1; % Move to next row for next UWB measurement
             end
+        end
+
+        function neighborsData = collectNeighborsData(self)
+            % collectNeighborData gathers the states and covariances from the neighbors
+            % Returns the states and covariances of the drone's neighbors
+
+            % Get the indices of the neighbors
+            neighborIndices = self.swarm.neighbors{self.uavIndex};
+
+            % Initialize cell arrays to store states and covariances
+            neighborsData.stateVectors = cell(1, length(neighborIndices) + 1);
+            neighborsData.covarianceMatrices = cell(1, length(neighborIndices) + 1);
+
+            % Add the state and covariance of the UAV itself
+            neighborsData.stateVectors{1} = self.uavStateVector;
+            neighborsData.covarianceMatrices{1} = self.uavCovarianceMatrix;
+
+            % Collect state and covariance from each neighbor
+            for i = 1:length(neighborIndices)
+                neighborIndex = neighborIndices(i);
+                neighborsData.stateVectors{i + 1} = self.swarm.UAVs(neighborIndex).uavStateVector;
+                neighborsData.covarianceMatrices{i + 1} = self.swarm.UAVs(neighborIndex).uavCovarianceMatrix;
+            end
+        end
+
+        function [fusedState, fusedCovariance] = covarianceIntersection(~, neighborsData)
+            % covarianceIntersection applies Covariance Intersection to fuse multiple state estimates
+            % neighbors: Struct with fields 'states' and 'covariances' from neighboring UAVs
+
+            % Number of states to be fused
+            numStates = length(neighborsData.stateVectors);
+
+            % Initial fused state and covariance
+            fusedState = zeros(size(neighborsData.stateVectors{1}));
+            fusedCovariance = zeros(size(neighborsData.covarianceMatrices{1}));
+
+            % Initialize the weighting parameter
+            omega = ones(numStates, 1) / numStates; % Equal weights initially
+
+            % Optimize weights (simple example, adjust as needed)
+            % Here, we can apply a more sophisticated optimization method if necessary.
+            maxIterations = 100;
+            for iter = 1:maxIterations
+                % Initialize temporary fusion variables
+                tempState = zeros(size(fusedState));
+                tempCovariance = zeros(size(fusedCovariance));
+
+                % Weighted sum of covariances
+                for i = 1:numStates
+                    tempState = tempState + omega(i) * (inv(neighborsData.covarianceMatrices{i}) * neighborsData.stateVectors{i});
+                    tempCovariance = tempCovariance + omega(i) * inv(neighborsData.covarianceMatrices{i});
+                end
+
+                % Calculate fused covariance
+                fusedCovariance = inv(tempCovariance);
+
+                % Calculate fused state
+                fusedState = fusedCovariance * tempState;
+
+                % Update omega (for simplicity, keep equal in this example)
+                % A real implementation should involve optimizing omega to minimize some error metric.
+                omega = ones(numStates, 1) / numStates;
+            end
+        end
+
+        function fuseWithNeighbors(self)
+            % fuseWithNeighbors applies Covariance Intersection with the states and covariances of neighbors
+
+            % Collect neighbor data
+            neighborsData = self.collectNeighborsData();
+
+            % Apply Covariance Intersection
+            [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData);
+
+            % Update own state and covariance with the fused values
+            self.uavStateVectorCI = fusedState;
+            self.uavCovarianceMatrixCI = fusedCovariance;
         end
     end
 end

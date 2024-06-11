@@ -32,6 +32,8 @@ while advance(Swarm.simulationScene)
     % measurements are carried out and passed as input
     Swarm.extendedKalmanFilter();
 
+    Swarm.fuseWithNeighbors();
+
     if Swarm.checkMotionEnded
         break;
     end

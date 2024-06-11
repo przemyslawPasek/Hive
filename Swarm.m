@@ -30,7 +30,7 @@ classdef Swarm < handle
             % Initialize UAVs
             for uavIndex = 1:self.nbAgents
                 uavFlightData = scenarioData.Platforms(uavIndex);
-                UAV = Drone(self.simulationScene,uavFlightData,swarmParameters);
+                UAV = Drone(self.simulationScene,uavFlightData,self,swarmParameters);
                 self.UAVs = [self.UAVs UAV];
                 self.trueLLAPositions = [self.trueLLAPositions UAV.uavLLAVector];
                 self.truePositions = [self.truePositions UAV.uavPosition];
@@ -181,6 +181,14 @@ classdef Swarm < handle
                 self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements);
             end
         end
+
+        function fuseWithNeighbors(self)
+            for uavIndex = 1:self.nbAgents
+                self.UAVs(uavIndex).fuseWithNeighbors();
+            end
+        end
+
+
     end
 end
 
