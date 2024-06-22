@@ -1,3 +1,94 @@
+% DRONE CLASS
+% ===========
+%
+% Table of Contents
+% -----------------
+%
+% Properties:
+%   - UAV identification properties and scenario variables
+%       - simulationScene: Scenario in which UAV operates
+%       - uavPlatform: UAV platform (scenario)
+%       - uavFlightData: UAV platform data in scenario
+%       - uavIndex: Number of the UAV in the swarm
+%       - uavSI: The starting index for the UAV's coordinates
+%       - swarm: Reference to the Swarm object containing all UAVs
+%       - swarmParameters: Parameters related to the swarm
+%
+%   - UAV State
+%       - uavMotionVector: UAV motion vector with 16 elements
+%       - uavPosition: 3D position [X, Y, Z]
+%       - uavVelocity: 3D velocity [Vx, Vy, Vz]
+%       - uavOrientation: 3D orientation [quaternion vector]
+%       - uavLLAVector: 3D position [Lat Long Alt]
+%       - uavLatitude: UAV true latitude
+%       - uavLongtitude: UAV true longitude
+%       - uavAltitude: UAV true altitude
+%       - uavPitch: UAV true pitch
+%       - uavRoll: UAV true roll
+%       - uavYaw: UAV true yaw
+%       - uavGroundspeed: UAV true groundspeed
+%
+%   - GPS Data
+%       - gpsPosition: GPS measured position
+%       - gpsVelocity: GPS measured velocity
+%       - gpsGroundspeed: GPS measured groundspeed
+%       - gpsCourse: GPS course
+%       - gpsIsUpdated: GPS update status
+%       - gpsSampleTime: GPS sample time
+%
+%   - UWB Sensor Data
+%       - uwbRanges: Ranges to UAV neighbors
+%
+%   - Sensor Models
+%       - GPS: GPS sensor model
+%       - GPSsensor: Mounted GPS sensor
+%       - insGnssSensor: INS/GNSS sensor (to be defined)
+%       - uwbSensor: UWB sensor (to be defined)
+%
+%   - State Variables
+%       - uavStateVector: State vector for estimation
+%       - uavCovarianceMatrix: Covariance matrix for estimation
+%       - uavStateVectorCI: Fused state vector after Covariance Intersection
+%       - uavCovarianceMatrixCI: Fused covariance matrix after Covariance Intersection
+%
+%   - Time Step
+%       - timeStep: Simulation time step
+%
+% Methods:
+% --------
+%
+% Constructor:
+%   - Drone: Initializes the Drone object with simulation scene, flight data, swarm, and swarm parameters
+%
+% Sensor Functions:
+%   - mountGPS: Defines the GPS model and mounts the GPS sensor on the UAV
+%   - readGPS: Reads the GPS sensor measurements
+%
+% UAV State Functions:
+%   - transformOrientation: Transforms true orientation from quaternion to yaw, pitch, roll angles
+%   - calculateGroundspeed: Calculates true groundspeed from velocity components
+%   - updateNavData: Updates true UAV data in a timestep
+%
+% EKF Functions:
+%   - extendedKalmanFilter: Applies the Extended Kalman Filter update using GPS and UWB measurements
+%   - constructObservationMatrix: Constructs the observation matrix H for EKF
+%
+% Data fusion functions:
+%   - fuseWithNeighborsCI: Fuses the UAV's state with its neighbors using Covariance Intersection
+%   - fuseWithNeighborsEVCI: Fuses data with neighbors using PCA-based Covariance Intersection
+%   - covarianceIntersection: Applies Covariance Intersection to fuse multiple state estimates
+%   - collectNeighborsData: Collects state and covariance data from the UAV's neighbors
+%   - pcaCompression: Performs PCA-based data compression on the covariance matrix
+%   - reconstructCovarianceMatrix: Reconstructs the covariance matrix from received PCA-compressed data
+%
+% Mesh Update:
+%   - updateMesh: Sets up and updates the platform mesh with position and orientation
+%
+% Note:
+% -----
+% This table of contents provides a structured overview of the Drone class for easy reference and navigation.
+% ==========================================================================================================
+
 classdef Drone < handle
     properties
 
@@ -6,9 +97,9 @@ classdef Drone < handle
         uavPlatform % UAV platform (scenario)
         uavFlightData % UAV platform data in scenario
         uavIndex % Number of the UAV in the swarm
-        uavSI % The starting index for the UAV's coordinates (SI - Starting Index)
+        uavSI % The starting index for the UAV's coordinates in the state vector (SI - Starting Index)
         swarm % Reference to the Swarm object containing all UAVs
-        swarmParameters
+        swarmParameters % Parameters related to the swarm
 
         % UAV State
         uavMotionVector % UAV motion vector with 16 elements
@@ -51,9 +142,10 @@ classdef Drone < handle
         % Fused state variables
         uavStateVectorCI
         uavCovarianceMatrixCI
-
-        % Kalman Filter
-        ekf
+        uavStateVectorEVCI
+        uavCovarianceMatrixEVCI
+        uavStateVectorTMP
+        uavCovarianceMatrixTMP
 
         % Time Step
         timeStep
@@ -98,6 +190,12 @@ classdef Drone < handle
             self.uavCovarianceMatrix = eye(self.swarmParameters.nbAgents*3)*1000;
 
             self.uavStateVector(self.uavSI:self.uavSI+2) = self.uavLLAVector';
+
+            self.uavStateVectorCI = self.uavStateVector;
+            self.uavStateVectorEVCI = self.uavStateVector;
+
+            self.uavCovarianceMatrixCI = self.uavCovarianceMatrix;
+            self.uavCovarianceMatrixEVCI = self.uavCovarianceMatrix;
 
             % Set up platform mesh. Add a rotation to orient the mesh to the UAV body frame.
             updateMesh(self.uavPlatform,"quadrotor",{10},[1 0 0],self.uavPosition,self.uavOrientation);
@@ -156,14 +254,25 @@ classdef Drone < handle
         % gpsMeasurements: GPS measurements vector [x, y, z]
         % uwbMeasurements: UWB range measurements vector [range1, range2, ...]
         % dt: Time step for the filter
-        function extendedKalmanFilter(self,gpsMeasurements,uwbMeasurements)
+        function extendedKalmanFilter(self,gpsMeasurements,uwbMeasurements,fusionAlgorithm)
 
-            F = eye(length(self.uavStateVector));
-            Q = 0.01 * eye(length(self.uavStateVector));
+            if strcmp(fusionAlgorithm,'None')
+                stateVector = self.uavStateVector;
+                covarianceMatrix = self.uavCovarianceMatrix;
+            elseif strcmp(fusionAlgorithm,'CI')
+                stateVector = self.uavStateVectorCI;
+                covarianceMatrix = self.uavCovarianceMatrixCI;
+            elseif strcmp(fusionAlgorithm,'EVCI')
+                stateVector = self.uavStateVectorEVCI;
+                covarianceMatrix = self.uavCovarianceMatrixEVCI;
+            end
+
+            F = eye(length(stateVector));
+            Q = 0.01 * eye(length(stateVector));
 
             %%%%%%%%%% Prediction %%%%%%%%%%%%
-            uavPredictedStateVector = F * self.uavStateVector;
-            uavPredictedCovarianceMatrix = F * self.uavCovarianceMatrix * F' + Q;
+            uavPredictedStateVector = F * stateVector;
+            uavPredictedCovarianceMatrix = F * covarianceMatrix * F' + Q;
 
             nbAgents = self.swarmParameters.nbAgents;
 
@@ -188,8 +297,16 @@ classdef Drone < handle
             I = eye(size(K, 1));
             uavUpdatedCovarianceMatrix = (I - K * H) * uavPredictedCovarianceMatrix;
 
-            self.uavStateVector = uavUpdatedStateVector;
-            self.uavCovarianceMatrix = uavUpdatedCovarianceMatrix;
+            if strcmp(fusionAlgorithm,'None')
+                self.uavStateVector = uavUpdatedStateVector;
+                self.uavCovarianceMatrix = uavUpdatedCovarianceMatrix;
+            elseif strcmp(fusionAlgorithm,'CI')
+                self.uavStateVectorCI = uavUpdatedStateVector;
+                self.uavCovarianceMatrixCI = uavUpdatedCovarianceMatrix;
+            elseif strcmp(fusionAlgorithm,'EVCI')
+                self.uavStateVectorEVCI = uavUpdatedStateVector;
+                self.uavCovarianceMatrixEVCI = uavUpdatedCovarianceMatrix;
+            end
         end
 
         %% Function which constructs the observation matrix H for EKF
@@ -198,7 +315,7 @@ classdef Drone < handle
         % predictedState: Predicted state vector
         function H = constructObservationMatrix(~, numUAVs, measurementLength, predictedState)
 
-            H = sparse(measurementLength, numUAVs * 3); % Initialize H as a sparse matrix
+            H = zeros(measurementLength, numUAVs * 3); % Initialize H as a sparse matrix
 
             % Insert identity matrix for GPS measurements (self measurements)
             H(1:3, 1:3) = eye(3); % First three rows map to the first UAV's coordinates
@@ -229,81 +346,178 @@ classdef Drone < handle
             end
         end
 
-        function neighborsData = collectNeighborsData(self)
-            % collectNeighborData gathers the states and covariances from the neighbors
-            % Returns the states and covariances of the drone's neighbors
+        %% Funtion which conducts data fusion using classic Covariance Intersection algorithm
+        %  Dependency: collectNeighborsData() - gather state and covariance 
+        %  from neighbors
+        %  covaraianceIntersection() - conduct CI with ulaltered dataset
+        function fuseWithNeighborsCI(self)
+
+            % Collect neighbor data
+            neighborsData = self.collectNeighborsData();
+            % Apply Covariance Intersection
+            [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData);
+
+            % Update own state and covariance with the fused values
+            self.uavStateVectorTMP = fusedState;
+            self.uavCovarianceMatrixTMP = fusedCovariance;
+        end
+
+        %% Funtion which conducts data fusion using EVCI algorithm
+        %  Dependency: pcaCompression() - conduct PCA compression and data
+        %  reduction
+        %  covaraianceIntersection() - conduct CI with prepared dataset
+        function fuseWithNeighborsEVCI(self)
 
             % Get the indices of the neighbors
-            neighborIndices = self.swarm.neighbors{self.uavIndex};
+            neighborIndices = self.swarm.swarmInnerConnections{self.uavIndex};
+            swarmWeights = self.swarm.metropolisWeights{self.uavIndex};
 
             % Initialize cell arrays to store states and covariances
             neighborsData.stateVectors = cell(1, length(neighborIndices) + 1);
             neighborsData.covarianceMatrices = cell(1, length(neighborIndices) + 1);
+            neighborsData.weights = cell(1, length(neighborIndices) + 1);
 
             % Add the state and covariance of the UAV itself
-            neighborsData.stateVectors{1} = self.uavStateVector;
-            neighborsData.covarianceMatrices{1} = self.uavCovarianceMatrix;
+            neighborsData.stateVectors{self.uavIndex} = self.uavStateVectorEVCI;
+            neighborsData.covarianceMatrices{self.uavIndex} = self.uavCovarianceMatrixEVCI;
+            neighborsData.weights{self.uavIndex} = swarmWeights(self.uavIndex);
 
-            % Collect state and covariance from each neighbor
-            for i = 1:length(neighborIndices)
-                neighborIndex = neighborIndices(i);
-                neighborsData.stateVectors{i + 1} = self.swarm.UAVs(neighborIndex).uavStateVector;
-                neighborsData.covarianceMatrices{i + 1} = self.swarm.UAVs(neighborIndex).uavCovarianceMatrix;
+            reductionThreshold = 1000000;
+            for neighborIndex = neighborIndices
+                % Get the neighbor UAV's data (simulated as received data)
+                neighborDrone = self.swarm.UAVs(neighborIndex); % Access the neighbor UAV
+
+                % Step 1: Compress the neighbor's data
+                [transmittedMatrix, transmittedEigenvalues] = neighborDrone.pcaCompression(reductionThreshold);
+
+                % Step 2: Simulate transmission and reception
+                receivedMatrix = transmittedMatrix;
+
+                % Reconstruct or directly use received data
+                if ~isempty(receivedMatrix)
+                    dataToBeFused = true;
+                    numDiscardedComponents = length(self.uavStateVector)-length(transmittedEigenvalues);
+                    PapproxNeighbor = self.reconstructCovarianceMatrix(receivedMatrix, numDiscardedComponents);
+                    if ~isempty(PapproxNeighbor)
+                        neighborsData.stateVectors{neighborIndex} = self.swarm.UAVs(neighborIndex).uavStateVectorEVCI;
+                        neighborsData.covarianceMatrices{neighborIndex} = PapproxNeighbor;
+                        neighborsData.weights{neighborIndex} = swarmWeights(neighborIndex);
+                    end
+                end
+            end
+
+            % Perform Covariance Intersection or other fusion with valid data
+            if dataToBeFused == true
+                [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData);
+                % Update own state and covariance with the fused values
+                self.uavStateVectorTMP = fusedState;
+                self.uavCovarianceMatrixTMP = fusedCovariance;
             end
         end
 
+        %% Funtion which applies Covariance Intersection to fuse multiple state estimates
+        %  Input: neighborsData - struct with fields 'states' and 'covariances' from neighboring UAVs
+        %  Output: fusedState, fusedCovraiance
         function [fusedState, fusedCovariance] = covarianceIntersection(~, neighborsData)
-            % covarianceIntersection applies Covariance Intersection to fuse multiple state estimates
-            % neighbors: Struct with fields 'states' and 'covariances' from neighboring UAVs
 
-            % Number of states to be fused
-            numStates = length(neighborsData.stateVectors);
+            nbDronesToBeFused = size(neighborsData.stateVectors,2);
 
             % Initial fused state and covariance
             fusedState = zeros(size(neighborsData.stateVectors{1}));
             fusedCovariance = zeros(size(neighborsData.covarianceMatrices{1}));
 
-            % Initialize the weighting parameter
-            omega = ones(numStates, 1) / numStates; % Equal weights initially
+            % Initialize temporary fusion variables
+            fusedCovInv = zeros(size(fusedCovariance));
 
-            % Optimize weights (simple example, adjust as needed)
-            % Here, we can apply a more sophisticated optimization method if necessary.
-            maxIterations = 100;
-            for iter = 1:maxIterations
-                % Initialize temporary fusion variables
-                tempState = zeros(size(fusedState));
-                tempCovariance = zeros(size(fusedCovariance));
+            for fusedDroneIndex = 1:nbDronesToBeFused
+                fusedCovInv = fusedCovInv + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatrices{fusedDroneIndex}^(-1);
+            end
+            % Invert to get the fused covariance matrix
+            fusedCovariance = inv(fusedCovInv);
 
-                % Weighted sum of covariances
-                for i = 1:numStates
-                    tempState = tempState + omega(i) * (inv(neighborsData.covarianceMatrices{i}) * neighborsData.stateVectors{i});
-                    tempCovariance = tempCovariance + omega(i) * inv(neighborsData.covarianceMatrices{i});
-                end
+            for fusedDroneIndex = 1:nbDronesToBeFused
+                fusedState =  fusedState + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatrices{fusedDroneIndex}^(-1) * neighborsData.stateVectors{fusedDroneIndex};
+            end
+            fusedState = fusedCovariance * fusedState;
+        end
 
-                % Calculate fused covariance
-                fusedCovariance = inv(tempCovariance);
+        %% Funtion which gathers the states and covariances from the neighbors
+        %  Input: uavIndex, neighborIndex, metropolisWeights
+        %  Output: neighborWeight for specific UAV
+        % Returns the states and covariances of the drone's neighbors
+        function neighborsData = collectNeighborsData(self)
 
-                % Calculate fused state
-                fusedState = fusedCovariance * tempState;
+            % Get the indices of the neighbors
+            neighborIndices = self.swarm.swarmInnerConnections{self.uavIndex};
+            swarmWeights = self.swarm.metropolisWeights{self.uavIndex};
 
-                % Update omega (for simplicity, keep equal in this example)
-                % A real implementation should involve optimizing omega to minimize some error metric.
-                omega = ones(numStates, 1) / numStates;
+            % Initialize cell arrays to store states and covariances
+            neighborsData.stateVectors = cell(1, length(neighborIndices) + 1);
+            neighborsData.covarianceMatrices = cell(1, length(neighborIndices) + 1);
+            neighborsData.weights = cell(1, length(neighborIndices) + 1);
+
+            % Add the state and covariance of the UAV itself
+            neighborsData.stateVectors{self.uavIndex} = self.uavStateVectorCI;
+            neighborsData.covarianceMatrices{self.uavIndex} = self.uavCovarianceMatrixCI;
+            neighborsData.weights{self.uavIndex} = swarmWeights(self.uavIndex);
+
+            % Collect state and covariance from each neighbor
+            for neighborIndex = neighborIndices
+                neighborsData.stateVectors{neighborIndex} = self.swarm.UAVs(neighborIndex).uavStateVectorCI;
+                neighborsData.covarianceMatrices{neighborIndex} = self.swarm.UAVs(neighborIndex).uavCovarianceMatrixCI;
+                neighborsData.weights{neighborIndex} = swarmWeights(neighborIndex);
             end
         end
 
-        function fuseWithNeighbors(self)
-            % fuseWithNeighbors applies Covariance Intersection with the states and covariances of neighbors
+        %% PCA-based data compression
+        %  Input: reductionThreshold
+        %  Output: transmittedMatrix - matrix with eigenvector coeefs
+        %  intended for transmission
+        %  significantEigenvalues - eigenvalues intended for transmission
+        function [transmittedMatrix, significantEigenvalues] = pcaCompression(self, reductionThreshold)
+  
+            % Print the eigenvalues for debugging
+            eigenvalues = eig(self.uavCovarianceMatrixEVCI);
+            disp('Eigenvalues before PCA:');
+            disp(eigenvalues);
 
-            % Collect neighbor data
-            neighborsData = self.collectNeighborsData();
+            % Perform PCA on the covariance matrix
+            [pcaCoefficients,pcaEigenvalues] = pcacov(self.uavCovarianceMatrixEVCI);
 
-            % Apply Covariance Intersection
-            [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData);
+            % Determine the number of components to retain
+            numSignificant = sum(pcaEigenvalues > reductionThreshold);
 
-            % Update own state and covariance with the fused values
-            self.uavStateVectorCI = fusedState;
-            self.uavCovarianceMatrixCI = fusedCovariance;
+            % Transmit only reduced components
+            % Select the significant components
+            significantComponents = pcaCoefficients(:,(1+numSignificant):size(pcaCoefficients,2));
+            significantEigenvalues = pcaEigenvalues((1+numSignificant):length(pcaEigenvalues));
+
+            % Prepare the matrix to be transmitted
+            transmittedMatrix = significantComponents * sqrt(diag(significantEigenvalues));
+        end
+
+        %% Reconstruct the covariance matrix from received data
+        %  Input: receivedMatrix - matrix received from neighbor UAV (as
+        %  transmittedMatrix in pcaCompression method)
+        %  numDiscardedComponents - difference between a full vector of
+        %  eigenvalues and significant ones
+        %  Output: reconstructedCovarianceMatrix
+        function reconstructedCovarianceMatrix = reconstructCovarianceMatrix(~, receivedMatrix, numDiscardedComponents)
+            % Calculate the orthonormal basis for the null space of the received matrix
+            insertedCoefficients = null(receivedMatrix');
+
+            % Create the artificial eigenvalues for the discarded components
+            insertedEigenvalues = 1e6 * ones(numDiscardedComponents, 1);
+
+            % Create the matrix C
+            C = insertedCoefficients * diag(insertedEigenvalues) * insertedCoefficients';
+
+            % Create the matrix A from the received matrix
+            A = receivedMatrix * receivedMatrix';
+
+            % Reconstruct the approximate covariance matrix
+            reconstructedCovarianceMatrix = C + A;
         end
     end
 end
+
