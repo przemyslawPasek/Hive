@@ -1,6 +1,6 @@
 % SWARM CLASS
 % ===========
-% 
+%
 % Table of Contents
 % -----------------
 %
@@ -17,11 +17,16 @@
 %       - truePositions: Vector containing true scenario positions of each UAV
 %       - swarmInnerConnections: Cell array holding neighbors' indices for each UAV
 %       - metropolisWeights: Cell array of Metropolis weights for each UAV
+%
+%   - Swarm Simulation Parameters and Simulation Output:
 %       - swarmParameters: Struct containing parameters related to the swarm
+%       - loggedData: Struct containing logged estimation data
+%       - processedData: Struct containing processed data with calculated metrics
+%       - timeStep
 %
 % Methods:
 % --------
-% 
+%
 % Constructor:
 %   - Swarm: Initializes the Swarm object with scenario data, creates UAVs, and sets initial parameters.
 %
@@ -65,6 +70,9 @@ classdef Swarm < handle
         swarmInnerConnections % Cell array to hold neighbors' indices for each UAV
         metropolisWeights % Cell array of Metropolis weights for each UAV
         swarmParameters % Struct containing parameters related to the swarm
+        loggedData % Struct containing logged estimation data
+        processedData % Struct containing processed data with calculated metrics
+        timeStep
     end
 
     methods
@@ -87,6 +95,32 @@ classdef Swarm < handle
             self.swarmParameters.nbAgents = self.nbAgents;
             self.swarmParameters.maxRange = 10;
 
+            self.timeStep = self.simulationScene.CurrentTime;
+
+            % Initialize logData as a structure array with one element per UAV
+            self.loggedData = repmat(struct('trueState', [], ...
+                'estimatedState', [], ...
+                'estimatedStateCI', [], ...
+                'estimatedStateEVCI', [], ...
+                'estimatedCovariance', [], ...
+                'estimatedCovarianceCI', [], ...
+                'estimatedCovarianceEVCI', []), 1, self.nbAgents);
+
+            % Initialize the loggedData structure
+            self.processedData = repmat(struct('rmseEKF', [], ...
+                'rmseCI', [], ...
+                'rmseEVCI', [], ...
+                'ateEKF', [], ...
+                'ateCI', [], ...
+                'ateEVCI', [], ...
+                'rpeEKF', [], ...
+                'rpeCI', [], ...
+                'rpeEVCI', [], ...
+                'nisEKF', [], ...
+                'nisCI', [], ...
+                'nisEVCI', [], ...
+                'reducedVectors',[]), 1, self.nbAgents);
+
             % Initialize UAVs
             for uavIndex = 1:self.nbAgents
                 % Assign flight data to specific UAV - extract from
@@ -95,10 +129,10 @@ classdef Swarm < handle
 
                 % Create required number of UAVs as Drone class objects
                 UAV = Drone(self.simulationScene,uavFlightData,self,self.swarmParameters);
-                
+
                 % Add UAV to UAVs vector containing Drone objects
                 self.UAVs = [self.UAVs UAV];
-                
+
                 % Append data about positions to the dedicated vectors
                 % which will hold coordinates of the entire Swarm
                 self.trueLLAPositions = [self.trueLLAPositions UAV.uavLLAVector];
@@ -129,6 +163,7 @@ classdef Swarm < handle
         function updateNavData(self)
             for uavIndex = 1:self.nbAgents
                 self.UAVs(uavIndex).updateNavData();
+                self.timeStep = self.simulationScene.CurrentTime;
             end
         end
 
@@ -246,9 +281,9 @@ classdef Swarm < handle
             for uavIndex = 1:self.nbAgents
                 gpsMeasurements = self.UAVs(uavIndex).gpsPosition';
                 uwbMeasurements = self.conductRangeMeasurements(uavIndex,0);
-                % self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements,'None');
+                self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements,'None');
                 self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements,'CI');
-                % self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements,'EVCI');
+                self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements,'EVCI');
             end
         end
 
@@ -305,7 +340,7 @@ classdef Swarm < handle
             end
         end
 
-        %% Data fusion with UAVs around - collects data from nieghbors using 
+        %% Data fusion with UAVs around - collects data from nieghbors using
         %  eigenvalue decomposition and data reduction, then fuse using CI
         function fuseWithNeighborsEVCI(self)
             for uavIndex = 1:self.nbAgents
@@ -315,6 +350,136 @@ classdef Swarm < handle
                 self.UAVs(uavIndex).uavStateVectorEVCI = self.UAVs(uavIndex).uavStateVectorTMP;
                 self.UAVs(uavIndex).uavCovarianceMatrixEVCI = self.UAVs(uavIndex).uavCovarianceMatrixTMP;
             end
+        end
+
+        %% Method to log data for each UAV at each time step
+        %  Output: loggedData struct
+        function logUAVData(self)
+            for uavIndex = 1:self.nbAgents
+                self.loggedData(uavIndex).trueState(:, self.timeStep) = self.trueLLAPositions;
+                self.loggedData(uavIndex).estimatedState(:, self.timeStep) = self.UAVs(uavIndex).uavStateVector;
+                self.loggedData(uavIndex).estimatedStateCI(:, self.timeStep) = self.UAVs(uavIndex).uavStateVectorCI;
+                self.loggedData(uavIndex).estimatedStateEVCI(:, self.timeStep) = self.UAVs(uavIndex).uavStateVectorEVCI;
+                self.loggedData(uavIndex).estimatedCovariance(:, :, self.timeStep) = self.UAVs(uavIndex).uavCovarianceMatrix;
+                self.loggedData(uavIndex).estimatedCovarianceCI(:, :, self.timeStep) = self.UAVs(uavIndex).uavCovarianceMatrixCI;
+                self.loggedData(uavIndex).estimatedCovarianceEVCI(:, :, self.timeStep) = self.UAVs(uavIndex).uavCovarianceMatrixEVCI;
+            end
+        end
+
+        %% Function to calculate metrics comparing no data fusion, CI and EVCI
+        function calculateMetrics(self)
+            for uavIndex = 1:self.nbAgents
+
+                % Extract true and estimated states
+                trueState = self.loggedData(uavIndex).trueState;
+                estimatedState = self.loggedData(uavIndex).estimatedState;
+                estimatedStateCI = self.loggedData(uavIndex).estimatedStateCI;
+                estimatedStateEVCI = self.loggedData(uavIndex).estimatedStateEVCI;
+
+                % Calculate RMSE for each method
+                self.processedData(uavIndex).rmseEKF = sqrt(mean((trueState - estimatedState).^2, 1));
+                self.processedData(uavIndex).rmseCI = sqrt(mean((trueState - estimatedStateCI).^2, 1));
+                self.processedData(uavIndex).rmseEVCI = sqrt(mean((trueState - estimatedStateEVCI).^2, 1));
+
+                % Calculate ATE for each method
+                self.processedData(uavIndex).ateEKF = sqrt(sum((trueState - estimatedState).^2, 1));
+                self.processedData(uavIndex).ateCI = sqrt(sum((trueState - estimatedStateCI).^2, 1));
+                self.processedData(uavIndex).ateEVCI = sqrt(sum((trueState - estimatedStateEVCI).^2, 1));
+
+                % Calculate RPE for each method
+                if self.timeStep > 1
+                    for t = 2:self.timeStep
+                        deltaTrue = trueState(:, t) - trueState(:, t-1);
+                        deltaEKF = estimatedState(:, t) - estimatedState(:, t-1);
+                        deltaCI = estimatedStateCI(:, t) - estimatedStateCI(:, t-1);
+                        deltaEVCI = estimatedStateEVCI(:, t) - estimatedStateEVCI(:, t-1);
+
+                        self.processedData(uavIndex).rpeEKF(t-1) = sqrt(sum((deltaTrue - deltaEKF).^2));
+                        self.processedData(uavIndex).rpeCI(t-1) = sqrt(sum((deltaTrue - deltaCI).^2));
+                        self.processedData(uavIndex).rpeEVCI(t-1) = sqrt(sum((deltaTrue - deltaEVCI).^2));
+                    end
+                end
+
+                % Calculate NIS for each method
+                for t = 1:self.timeStep
+                    P_EKF = self.loggedData(uavIndex).estimatedCovariance(:, :, t);
+                    P_CI = self.loggedData(uavIndex).estimatedCovarianceCI(:, :, t);
+                    P_EVCI = self.loggedData(uavIndex).estimatedCovarianceEVCI(:, :, t);
+
+                    innovationEKF = trueState(:, t) - estimatedState(:, t);
+                    innovationCI = trueState(:, t) - estimatedStateCI(:, t);
+                    innovationEVCI = trueState(:, t) - estimatedStateEVCI(:, t);
+
+                    self.processedData(uavIndex).nisEKF(t) = innovationEKF' / P_EKF * innovationEKF;
+                    self.processedData(uavIndex).nisCI(t) = innovationCI' / P_CI * innovationCI;
+                    self.processedData(uavIndex).nisEVCI(t) = innovationEVCI' / P_EVCI * innovationEVCI;
+                end
+            end
+        end
+
+        %% Method to plot RMSE
+        function plotRMSE(self)
+            figure;
+            hold on;
+            for uavIndex = 1:self.nbAgents
+                plot(self.processedData(uavIndex).rmseEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
+                plot(self.processedData(uavIndex).rmseCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
+                plot(self.processedData(uavIndex).rmseEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
+            end
+            xlabel('Time Step');
+            ylabel('RMSE');
+            legend('show');
+            title('RMSE Comparison');
+            grid on;
+        end
+
+
+        %% Method to plot ATE
+        function plotATE(self)
+            figure;
+            hold on;
+            for uavIndex = 1:self.nbAgents
+                plot(self.processedData(uavIndex).ateEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
+                plot(self.processedData(uavIndex).ateCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
+                plot(self.processedData(uavIndex).ateEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
+            end
+            xlabel('Time Step');
+            ylabel('ATE');
+            legend('show');
+            title('ATE Comparison');
+            grid on;
+        end
+
+        %% Method to plot RPE
+        function plotRPE(self)
+            figure;
+            hold on;
+            for uavIndex = 1:self.nbAgents
+                plot(self.processedData(uavIndex).rpeEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
+                plot(self.processedData(uavIndex).rpeCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
+                plot(self.processedData(uavIndex).rpeEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
+            end
+            xlabel('Time Step');
+            ylabel('RPE');
+            legend('show');
+            title('RPE Comparison');
+            grid on;
+        end
+
+        %% Method to plot NIS
+        function plotNIS(self)
+            figure;
+            hold on;
+            for uavIndex = 1:self.nbAgents
+                plot(self.processedData(uavIndex).nisEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
+                plot(self.processedData(uavIndex).nisCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
+                plot(self.processedData(uavIndex).nisEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
+            end
+            xlabel('Time Step');
+            ylabel('NIS');
+            legend('show');
+            title('NIS Comparison');
+            grid on;
         end
     end
 end

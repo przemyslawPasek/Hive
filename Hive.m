@@ -34,7 +34,9 @@ while advance(Swarm.simulationScene)
 
     Swarm.fuseWithNeighborsCI();
 
-    % Swarm.fuseWithNeighborsEVCI();
+    Swarm.fuseWithNeighborsEVCI();
+
+    Swarm.logUAVData();
 
     if Swarm.checkMotionEnded
         break;
@@ -44,3 +46,8 @@ while advance(Swarm.simulationScene)
     show3D(Swarm.simulationScene,Parent=sceneAxes);
     drawnow limitrate
 end
+Swarm.calculateMetrics();
+Swarm.plotRMSE();
+Swarm.plotATE();
+Swarm.plotRPE();
+Swarm.plotNIS();

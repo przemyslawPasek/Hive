@@ -149,6 +149,13 @@ classdef Drone < handle
 
         % Time Step
         timeStep
+
+        % New properties for logging data reduction metrics
+        evciReductionMetrics % Cell array to store the number of significant components retained during EVCI
+        
+        % Logging CI and EVCI results
+        fusionResultsCI % Struct to log CI results
+        fusionResultsEVCI % Struct to log EVCI results
     end
 
     methods
@@ -382,7 +389,9 @@ classdef Drone < handle
             neighborsData.covarianceMatrices{self.uavIndex} = self.uavCovarianceMatrixEVCI;
             neighborsData.weights{self.uavIndex} = swarmWeights(self.uavIndex);
 
-            reductionThreshold = 1000000;
+            retainedComponentsLog = []; % Initialize logging for significant components
+
+            reductionThreshold = 100;
             for neighborIndex = neighborIndices
                 % Get the neighbor UAV's data (simulated as received data)
                 neighborDrone = self.swarm.UAVs(neighborIndex); % Access the neighbor UAV
@@ -392,6 +401,10 @@ classdef Drone < handle
 
                 % Step 2: Simulate transmission and reception
                 receivedMatrix = transmittedMatrix;
+
+                % Log the number of significant components retained
+                retainedComponentsLog = [retainedComponentsLog, length(transmittedEigenvalues)];
+
 
                 % Reconstruct or directly use received data
                 if ~isempty(receivedMatrix)
@@ -405,6 +418,9 @@ classdef Drone < handle
                     end
                 end
             end
+
+            % Log the data reduction metrics for this step
+            self.evciReductionMetrics{end+1} = retainedComponentsLog;
 
             % Perform Covariance Intersection or other fusion with valid data
             if dataToBeFused == true
@@ -475,14 +491,12 @@ classdef Drone < handle
         %  intended for transmission
         %  significantEigenvalues - eigenvalues intended for transmission
         function [transmittedMatrix, significantEigenvalues] = pcaCompression(self, reductionThreshold)
-  
-            % Print the eigenvalues for debugging
-            eigenvalues = eig(self.uavCovarianceMatrixEVCI);
-            disp('Eigenvalues before PCA:');
-            disp(eigenvalues);
+ 
+            % Ensure that covariance matrix is semi
+            covarianceMatrix = nearestSPD(self.uavCovarianceMatrixEVCI);
 
             % Perform PCA on the covariance matrix
-            [pcaCoefficients,pcaEigenvalues] = pcacov(self.uavCovarianceMatrixEVCI);
+            [pcaCoefficients,pcaEigenvalues] = pcacov(covarianceMatrix);
 
             % Determine the number of components to retain
             numSignificant = sum(pcaEigenvalues > reductionThreshold);
