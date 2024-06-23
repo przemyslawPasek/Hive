@@ -1,6 +1,6 @@
 clc; clear; close all;
 
-scenarioData = loadScenario("ScenarioTest.mat");
+scenarioData = loadScenario("Scenario_4UAV.mat");
 
 %% Parameteres
 
@@ -8,7 +8,7 @@ scenarioData = loadScenario("ScenarioTest.mat");
 Swarm = Swarm(scenarioData);
 
 % Mount GPS sensor on each UAV
-Swarm.mountGPS();
+Swarm.gpsMount();
 
 % Create environment
 sceneAxes = createEnvironment(Swarm.simulationScene);
@@ -45,6 +45,7 @@ while advance(Swarm.simulationScene)
     % Visualize the scenario
     show3D(Swarm.simulationScene,Parent=sceneAxes);
     drawnow limitrate
+    Swarm.swarmInnerConnections
 end
 Swarm.calculateMetrics();
 Swarm.plotRMSE();

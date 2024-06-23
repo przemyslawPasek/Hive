@@ -22,7 +22,7 @@
 %       - swarmParameters: Struct containing parameters related to the swarm
 %       - loggedData: Struct containing logged estimation data
 %       - processedData: Struct containing processed data with calculated metrics
-%       - timeStep
+%       - timeStep: Current time in the simulation
 %
 % Methods:
 % --------
@@ -31,14 +31,14 @@
 %   - Swarm: Initializes the Swarm object with scenario data, creates UAVs, and sets initial parameters.
 %
 % Sensor and Measurement Functions:
-%   - mountGPS: Defines the GPS model and mounts the GPS sensor on each UAV in the Swarm.
-%   - readGPS: Reads GPS sensor measurements from each UAV in the Swarm.
+%   - gpsMount: Defines the GPS model and mounts the GPS sensor on each UAV in the Swarm.
+%   - gpsConductMeasurement: Reads GPS sensor measurements from each UAV in the Swarm.
+%   - uwbConductMeasurement: Reads UWB sensor measurements from each UAV in the Swarm.
 %
 % Swarm Update Functions:
 %   - updateNavData: Updates the true navigation data (position, velocity, orientation) for each UAV.
 %   - checkMotionEnded: Checks if the motion of the UAVs has ended, based on the time of arrival in their trajectories.
 %   - updatePosAndDetermineNeighbors: Updates true positions of UAVs and determines their neighbors based on proximity.
-%   - conductRangeMeasurements: Simulates UWB range measurements from the UAV to its neighbors.
 %   - updateTruePositions: Updates the true position vector of each UAV in the Swarm.
 %
 % EKF and Estimation Functions:
@@ -72,7 +72,7 @@ classdef Swarm < handle
         swarmParameters % Struct containing parameters related to the swarm
         loggedData % Struct containing logged estimation data
         processedData % Struct containing processed data with calculated metrics
-        timeStep
+        timeStep % Current time in the simulation
     end
 
     methods
@@ -93,7 +93,7 @@ classdef Swarm < handle
 
             self.swarmParameters = struct();
             self.swarmParameters.nbAgents = self.nbAgents;
-            self.swarmParameters.maxRange = 10;
+            self.swarmParameters.maxRange = 5;
 
             self.timeStep = self.simulationScene.CurrentTime;
 
@@ -145,17 +145,25 @@ classdef Swarm < handle
 
         %% Function which is responsible for definining GPS model and
         %  mounting GPS sensor on each UAV in the Swarm
-        function mountGPS(self)
+        function gpsMount(self)
             for uavIndex = 1:self.nbAgents
-                self.UAVs(uavIndex).mountGPS();
+                self.UAVs(uavIndex).gpsMount();
             end
         end
 
         %% Function which is responsible for reading GSP sensor measurements
         %  from each UAV in the Swarm
-        function readGPS(self)
+        function gpsConductMeasurement(self)
             for uavIndex = 1:self.nbAgents
-                self.UAVs(uavIndex).readGPS();
+                self.UAVs(uavIndex).gpsConductMeasurement();
+            end
+        end
+
+        %% Function which is responsible for reading UWB sensor measurements
+        %  from each UAV in the Swarm
+        function uwbConductMeasurement(self)
+            for uavIndex = 1:self.nbAgents
+                self.UAVs(uavIndex).uwbConductMeasurement();
             end
         end
 
@@ -206,47 +214,11 @@ classdef Swarm < handle
                         if distance <= self.swarmParameters.maxRange
                             neighbors = [neighbors, i];
                         end
+                        distance
                     end
                 end
                 self.swarmInnerConnections{uavIndex} = neighbors;
             end
-        end
-
-        %% Function which simulates UWB range measurements to neighbors
-        % uavIndex: Index of the UAV conducting the measurements (1-based index)
-        % measurementError: Standard deviation of the measurement error
-        function ranges = conductRangeMeasurements(self, uavIndex, measurementError)
-
-            % Get neighbors from the neighbors cell array
-            selfNeighbors = self.swarmInnerConnections{uavIndex};
-
-            % Initialize range measurements vector
-            ranges = zeros(1, length(selfNeighbors));
-
-            % Coordinates of the UAV conducting the measurements
-            x = self.trueLLAPositions((uavIndex-1)*3 + 1);
-            y = self.trueLLAPositions((uavIndex-1)*3 + 2);
-            z = self.trueLLAPositions((uavIndex-1)*3 + 3);
-
-            % Calculate the range to each neighbor
-            for i = 1:length(selfNeighbors)
-                neighborIndex = selfNeighbors(i);
-
-                % Coordinates of the neighbor UAV
-                x_other = self.trueLLAPositions((neighborIndex-1)*3 + 1);
-                y_other = self.trueLLAPositions((neighborIndex-1)*3 + 2);
-                z_other = self.trueLLAPositions((neighborIndex-1)*3 + 3);
-
-                % Calculate true range
-                trueRange = sqrt((x - x_other)^2 + (y - y_other)^2 + (z - z_other)^2);
-
-                % Add measurement noise
-                noisyRange = trueRange + measurementError * randn();
-
-                % Store the noisy range
-                ranges(i) = noisyRange;
-            end
-            self.UAVs(uavIndex).uwbRanges = ranges;
         end
 
         %% Function which updates true position vector of a specified UAV
@@ -277,10 +249,11 @@ classdef Swarm < handle
         % GPS and UWB measurements are carried out before and passed as an
         % input
         function extendedKalmanFilter(self)
-            self.readGPS();
+            self.gpsConductMeasurement();
+            self.uwbConductMeasurement();
             for uavIndex = 1:self.nbAgents
-                gpsMeasurements = self.UAVs(uavIndex).gpsPosition';
-                uwbMeasurements = self.conductRangeMeasurements(uavIndex,0);
+                gpsMeasurements = self.UAVs(uavIndex).gpsMeasurements;
+                uwbMeasurements = self.UAVs(uavIndex).uwbMeasurements;
                 self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements,'None');
                 self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements,'CI');
                 self.UAVs(uavIndex).extendedKalmanFilter(gpsMeasurements,uwbMeasurements,'EVCI');
@@ -432,7 +405,6 @@ classdef Swarm < handle
             title('RMSE Comparison');
             grid on;
         end
-
 
         %% Method to plot ATE
         function plotATE(self)

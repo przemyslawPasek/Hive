@@ -37,11 +37,11 @@
 %       - gpsSampleTime: GPS sample time
 %
 %   - UWB Sensor Data
-%       - uwbRanges: Ranges to UAV neighbors
+%       - uwbMeasurements: Ranges to UAV neighbors
 %
 %   - Sensor Models
-%       - GPS: GPS sensor model
-%       - GPSsensor: Mounted GPS sensor
+%       - gps: GPS sensor model
+%       - gpsModule: Mounted GPS sensor
 %       - insGnssSensor: INS/GNSS sensor (to be defined)
 %       - uwbSensor: UWB sensor (to be defined)
 %
@@ -61,8 +61,10 @@
 %   - Drone: Initializes the Drone object with simulation scene, flight data, swarm, and swarm parameters
 %
 % Sensor Functions:
-%   - mountGPS: Defines the GPS model and mounts the GPS sensor on the UAV
-%   - readGPS: Reads the GPS sensor measurements
+%   - gpsMount: Defines the GPS model and mounts the GPS sensor on the UAV
+%   - gpsConductMeasurement: Reads the GPS sensor measurements
+%   - uwbConductMeasurement: Simulates UWB range measurements from the UAV to its neighbors
+
 %
 % UAV State Functions:
 %   - transformOrientation: Transforms true orientation from quaternion to yaw, pitch, roll angles
@@ -127,12 +129,12 @@ classdef Drone < handle
         gpsSampleTime
 
         % Ranges to the UAV neighbors acquired with UWB sensor [r1 r2 ...]
-        uwbRanges
+        uwbMeasurements
 
         % Sensor Models
-        GPS
-        GPSsensor
-        insGnssSensor
+        gps
+        gpsModule
+        gpsMeasurements
         uwbSensor
 
         % State variables
@@ -152,10 +154,6 @@ classdef Drone < handle
 
         % New properties for logging data reduction metrics
         evciReductionMetrics % Cell array to store the number of significant components retained during EVCI
-        
-        % Logging CI and EVCI results
-        fusionResultsCI % Struct to log CI results
-        fusionResultsEVCI % Struct to log EVCI results
     end
 
     methods
@@ -211,17 +209,56 @@ classdef Drone < handle
 
         %% Function which is responsible for definining GPS model and mounting GPS sensor on UAV
         %  Output: GPS, GPSsensor
-        function mountGPS(self)
-            self.GPS = gpsSensor('SampleRate',2,'PositionInputFormat','Local','ReferenceLocation',[0 0 0]);
-            self.GPSsensor = uavSensor('GPS',self.uavPlatform,self.GPS,'MountingLocation',[0 0.1 0],'UpdateRate',1);
+        function gpsMount(self)
+            self.gps = gpsSensor('SampleRate',2,'PositionInputFormat','Local','ReferenceLocation',[0 0 0]);
+            self.gpsModule = uavSensor('GPS',self.uavPlatform,self.gps,'MountingLocation',[0 0.1 0],'UpdateRate',1);
         end
 
         %% Function which is responsible for reading GSP sensor measurements
         %  Output: gpsPosition, gpsVelocity, gpsGroundspeed, gpsCourse
-        function readGPS(self)
+        function gpsConductMeasurement(self)
             [self.gpsIsUpdated,self.gpsSampleTime, self.gpsPosition,...
                 self.gpsVelocity,self.gpsGroundspeed,self.gpsCourse] = ...
-                read(self.GPSsensor);
+                read(self.gpsModule);
+            self.gpsMeasurements = self.gpsPosition';
+        end
+
+        %% Function which simulates UWB range measurements to neighbors
+        %  Output: uwbMeasurements - vector of ranges to UAV neighbors
+        function uwbConductMeasurement(self)
+
+            % Get neighbors from the neighbors cell array
+            selfNeighbors = self.swarm.swarmInnerConnections{self.uavIndex};
+
+            % Initialize range measurements vector
+            ranges = zeros(length(selfNeighbors),1);
+
+            measurementError = 0;
+
+            % Coordinates of the UAV conducting the measurements
+            x = self.swarm.trueLLAPositions((self.uavIndex-1)*3 + 1);
+            y = self.swarm.trueLLAPositions((self.uavIndex-1)*3 + 2);
+            z = self.swarm.trueLLAPositions((self.uavIndex-1)*3 + 3);
+
+            % Calculate the range to each neighbor
+            for i = 1:length(selfNeighbors)
+                neighborIndex = selfNeighbors(i);
+
+                % Coordinates of the neighbor UAV
+                x_other = self.swarm.trueLLAPositions((neighborIndex-1)*3 + 1);
+                y_other = self.swarm.trueLLAPositions((neighborIndex-1)*3 + 2);
+                z_other = self.swarm.trueLLAPositions((neighborIndex-1)*3 + 3);
+
+                % Calculate true range
+                trueRange = sqrt((x - x_other)^2 + (y - y_other)^2 + (z - z_other)^2);
+
+                % Add measurement noise
+                noisyRange = trueRange + measurementError * randn();
+
+                % Store the noisy range
+                ranges(i) = noisyRange;
+            end
+            self.uwbMeasurements = ranges;
         end
 
         %% Function which is responsible for transforming true orientation of
@@ -354,7 +391,7 @@ classdef Drone < handle
         end
 
         %% Funtion which conducts data fusion using classic Covariance Intersection algorithm
-        %  Dependency: collectNeighborsData() - gather state and covariance 
+        %  Dependency: collectNeighborsData() - gather state and covariance
         %  from neighbors
         %  covaraianceIntersection() - conduct CI with ulaltered dataset
         function fuseWithNeighborsCI(self)
@@ -391,7 +428,7 @@ classdef Drone < handle
 
             retainedComponentsLog = []; % Initialize logging for significant components
 
-            reductionThreshold = 100;
+            reductionThreshold = 10;
             for neighborIndex = neighborIndices
                 % Get the neighbor UAV's data (simulated as received data)
                 neighborDrone = self.swarm.UAVs(neighborIndex); % Access the neighbor UAV
@@ -491,7 +528,7 @@ classdef Drone < handle
         %  intended for transmission
         %  significantEigenvalues - eigenvalues intended for transmission
         function [transmittedMatrix, significantEigenvalues] = pcaCompression(self, reductionThreshold)
- 
+
             % Ensure that covariance matrix is semi
             covarianceMatrix = nearestSPD(self.uavCovarianceMatrixEVCI);
 
