@@ -1,54 +1,52 @@
-clc; clear; close all;
+clc; clear; close all;  % Clearing command window, workspace, and closing all figures
 
-scenarioData = loadScenario("Scenario_4UAV.mat");
+addpath(pwd);  % Adding current directory to MATLAB's search path
 
-%% Parameteres
+scenarioData = loadScenario("Scenario4UAV.mat");  % Loading scenario data from Scenario4UAV.mat file
+
+%% Parameters
 
 % Initialize Swarm
-Swarm = Swarm(scenarioData);
-
-% Mount GPS sensor on each UAV
-Swarm.gpsMount();
+Swarm = Swarm(scenarioData);  % Creating a Swarm object with scenario data
 
 % Create environment
-sceneAxes = createEnvironment(Swarm.simulationScene);
+sceneAxes = createEnvironment(Swarm.simulationScene);  % Creating environment axes for visualization
 
-setup(Swarm.simulationScene)
+setup(Swarm.simulationScene);  % Setting up the simulation scene
 
-while advance(Swarm.simulationScene)
+while advance(Swarm.simulationScene)  % While advancing the simulation scene
 
     % Updates all sensor readings based on latest states of all platforms
-    % in the scenario (buil-in function)
+    % in the scenario (built-in function)
     updateSensors(Swarm.simulationScene);
            
     % Assign current values to the navigational variables of UAVs
     Swarm.updateNavData();
 
-    % Update Swarm's true postition vector [Lat Long Alt] and conduct
-    % vicinity ispection (find neighbors)
+    % Update Swarm's true position vector [Lat Long Alt] and conduct
+    % vicinity inspection (find neighbors)
     Swarm.updateTruePositions();
 
     % Conduct estimation in every UAV using EKF filter - GPS and UWB
     % measurements are carried out and passed as input
     Swarm.extendedKalmanFilter();
 
+    % Fuse state estimates with neighboring UAVs using Covariance Intersection (CI)
     Swarm.fuseWithNeighborsCI();
 
+    % Fuse state estimates with neighboring UAVs using Eigenvalue-based Covariance Intersection (EVCI)
     Swarm.fuseWithNeighborsEVCI();
 
+    % Log UAV data for further analysis
     Swarm.logUAVData();
 
-    if Swarm.checkMotionEnded
-        break;
-    end
-
     % Visualize the scenario
-    show3D(Swarm.simulationScene,Parent=sceneAxes);
-    drawnow limitrate
-    Swarm.swarmInnerConnections
+    show3D(Swarm.simulationScene, 'Parent', sceneAxes);  % Displaying 3D visualization of the scenario
+    drawnow limitrate  % Update the figure window
+
+    Swarm.swarmInnerConnections;  % Check and update swarm inner connections
 end
-Swarm.calculateMetrics();
-Swarm.plotRMSE();
-Swarm.plotATE();
-Swarm.plotRPE();
-Swarm.plotNIS();
+
+Swarm.calculateMetrics();  % Calculate metrics related to the swarm's performance
+Swarm.plotRMSE();  % Plot Root Mean Squared Error (RMSE) metrics
+Swarm.plotSwarmEstimations(3);  % Plot swarm estimations for the specified UAV index
