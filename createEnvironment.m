@@ -4,16 +4,16 @@ function sceneAxes = createEnvironment(simulationScene)
 [maxX, maxY, ~] = findFrameSize(simulationScene);
 
 if maxX <= 100 
-    polygonSizeX = 100; 
-    axesSizeX = 110;
+    polygonSizeX = 150; 
+    axesSizeX = 150;
 else
     polygonSizeX = 1000; 
     axesSizeX = 1100;
 end
 
 if maxY <= 100 
-    polygonSizeY = 100;
-    axesSizeY = 110;
+    polygonSizeY = 150;
+    axesSizeY = 150;
 else
     polygonSizeY = 1000;
     axesSizeY = 1100;
