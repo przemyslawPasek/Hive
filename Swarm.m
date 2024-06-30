@@ -33,6 +33,7 @@
 % Sensor and Measurement Functions:
 %   - gpsMount: Defines the GPS model and mounts the GPS sensor on each UAV in the Swarm.
 %   - gpsConductMeasurement: Reads GPS sensor measurements from each UAV in the Swarm.
+%   - gpsCheckNoise: Function which checks wheter the condtions conditions are met to apply noise.
 %   - uwbConductMeasurement: Reads UWB sensor measurements from each UAV in the Swarm.
 %
 % Swarm Update Functions:
@@ -110,11 +111,16 @@ classdef Swarm < handle
             % Initialize swarm parameters structure
             self.swarmParameters = repmat(struct('nbAgents', [], ...
                 'maxCommunicationRange', [], ...
-                'evciReductionThreshold', []),1);
+                'evciReductionThreshold', [],...
+                'noisePresence', [],...
+                'timeOfNoisePresence', []),1);
 
             self.swarmParameters.nbAgents = self.swarmNbAgents;
             self.swarmParameters.maxRange = 100;
             self.swarmParameters.evciReductionThreshold = 100;
+            self.swarmParameters.noisePresence = 0;
+            self.swarmParameters.timeOfNoisePresence = [5 15];
+
 
             % Initialize logged data structure
             self.simLoggedData = repmat(struct('trueState', [], ...
@@ -174,6 +180,26 @@ classdef Swarm < handle
         function gpsConductMeasurement(self)
             for uavIndex = 1:self.swarmNbAgents
                 self.UAVs(uavIndex).gpsConductMeasurement();
+            end
+        end
+
+        %% Function which checks wheter the condtions conditions are met 
+        %  to apply noise or restore original state of the gpsSensor 
+        %  (the conditions are time of noise)
+        %  Input: uavIndices - indices of UAVs with degraded GPS
+        function gpsCheckNoise(self,uavIndices)
+            if (self.simTimeStep >= self.swarmParameters.timeOfNoisePresence(1)) && ...
+                    (self.simTimeStep <= self.swarmParameters.timeOfNoisePresence(2)) && ...
+                    (self.swarmParameters.noisePresence == 0)
+                for uavIndex = uavIndices
+                    self.UAVs(uavIndex).gpsAddNoise();
+                end
+                self.swarmParameters.noisePresence = 1;
+            elseif (self.simTimeStep >= self.swarmParameters.timeOfNoisePresence(2)) && ...
+                    (self.swarmParameters.noisePresence == 1)
+                for uavIndex = uavIndices
+                    self.UAVs(uavIndex).gpsDeleteNoise();
+                end
             end
         end
 

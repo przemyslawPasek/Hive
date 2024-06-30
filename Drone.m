@@ -62,6 +62,8 @@
 % Sensor Functions:
 %   - gpsMount: Defines the GPS model and mounts the GPS sensor on the UAV
 %   - gpsConductMeasurement: Reads the GPS sensor measurements
+%   - gpsAddNoise: Modify gpsSensor model in order to apply additonal noise
+%   - gpsDeleteNoise: Restore original settings of gpsSensor (neglect additional noise)
 %   - uwbConductMeasurement: Simulates UWB range measurements from the UAV to its neighbors
 %
 % UAV State Functions:
@@ -214,6 +216,17 @@ classdef Drone < handle
                 self.gpsVelocity,self.gpsGroundspeed,self.gpsCourse] = ...
                 read(self.gpsModule);
             self.gpsMeasurements = self.gpsPosition';
+        end
+
+        %% Function which modify gpsSensor model in order to apply noise
+        function gpsAddNoise(self)
+            self.uavPlatform.Sensors(1).SensorModel.DecayFactor = 0;
+        end
+
+        %% Function which modify gpsSensor model in delete noise and 
+        %  restore original settings
+        function gpsDeleteNoise(self)
+            self.uavPlatform.Sensors(1).SensorModel.DecayFactor = 0.999;
         end
 
         %% Function to convert GPS spherical coordinates from to ECEF 

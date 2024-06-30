@@ -28,6 +28,12 @@ setup(Swarm.swarmSimulationScene);  % Setting up the simulation scene with platf
 % ----------------
 while advance(Swarm.swarmSimulationScene)  % Loop continues as long as the simulation scene can advance
     
+    % Sensors verification:
+    % ---------------------
+    % Checks if the conditions are met to apply noise to gpsSensor model or
+    % to restore accurate measurements.
+    Swarm.gpsCheckNoise([3 6]);
+
     % Sensor Updates:
     % ---------------
     % Updates all sensor readings based on the latest states of all platforms in the scenario
@@ -82,6 +88,7 @@ while advance(Swarm.swarmSimulationScene)  % Loop continues as long as the simul
     % Checks and updates the inner connections within the swarm to ensure all UAVs are appropriately linked.
     % This is important for maintaining communication and coordination among UAVs.
     Swarm.swarmInnerConnections;
+    Swarm.simTimeStep
 end
 
 % Post-Simulation Analysis:
@@ -90,7 +97,7 @@ end
 
 Swarm.calculateMetrics();  % Calculate metrics related to the swarm's performance, such as accuracy and efficiency
 Swarm.plotRMSE();  % Plot the Root Mean Squared Error (RMSE) metrics to evaluate estimation accuracy
-Swarm.plotSwarmEstimations(3);  % Plot the swarm estimations for the specified UAV index (3 in this case)
+Swarm.plotSwarmEstimations(1);  % Plot the swarm estimations for the specified UAV index (3 in this case)
 
 % End of Script
 % =============
