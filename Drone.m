@@ -1,53 +1,57 @@
-% DRONE CLASS
+%% DRONE CLASS
 % ===========
 %
 % Table of Contents
 % -----------------
 %
 % Properties:
-%   - UAV identification properties and scenario variables
-%       - simulationScene: Scenario in which UAV operates
-%       - uavPlatform: UAV platform (scenario)
-%       - uavFlightData: UAV platform data in scenario
-%       - uavIndex: Number of the UAV in the swarm
-%       - uavSI: The starting index for the UAV's coordinates
+%   - UAV Identification and Scenario Variables:
 %       - swarm: Reference to the Swarm object containing all UAVs
 %       - swarmParameters: Parameters related to the swarm
+%       - uavPlatform: UAV platform (Swarm scenario element)
+%       - uavFlightData: UAV platform data in scenario
+%       - uavIndex: Number of the UAV in the swarm
+%       - uavSI: The starting index for the UAV's coordinates in the state vector
 %
-%   - UAV State
-%       - uavMotionVector: UAV motion vector with 16 elements
-%       - uavPosition: 3D position [X, Y, Z]
-%       - uavVelocity: 3D velocity [Vx, Vy, Vz]
-%       - uavOrientation: 3D orientation [quaternion vector]
-%       - uavLLAVector: 3D position [Lat Long Alt]
-%       - uavLatitude: UAV true latitude
-%       - uavLongtitude: UAV true longitude
-%       - uavAltitude: UAV true altitude
-%       - uavPitch: UAV true pitch
-%       - uavRoll: UAV true roll
-%       - uavYaw: UAV true yaw
-%       - uavGroundspeed: UAV true groundspeed
+%   - UAV True State:
+%       - uavMotionVector: UAV motion vector with 16 elements [x, y, z, vx, vy, vz, ax, ay, az, q1, q2, q3, q4, wx, wy, wz]
+%       - uavTruePosition: 3D true position [X, Y, Z]
+%       - uavTrueVelocity: 3D true velocity [Vx, Vy, Vz]
+%       - uavTrueOrientation: 4-element quaternion vector [q1, q2, q3, q4]
+%       - uavLLAVector: 3D position [Latitude, Longitude, Altitude]
+%       - uavTrueLatitude: True latitude of the UAV
+%       - uavTrueLongitude: True longitude of the UAV
+%       - uavTrueAltitude: True altitude of the UAV
+%       - uavTruePitch: True pitch angle of the UAV
+%       - uavTrueRoll: True roll angle of the UAV
+%       - uavTrueYaw: True yaw angle of the UAV
+%       - uavTrueGroundspeed: True groundspeed of the UAV (calculated from true velocity)
 %
-%   - GPS Data
+%   - GPS Sensor Data:
+%       - gps: GPS sensor object (gpsSensor object)
+%       - gpsModule: Mounted GPS sensor module (uavSensor object)
+%       - gpsMeasurements: GPS measured data
+%       - gpsMeasurementsENU: GPS measurements in ENU (East-North-Up) coordinates
 %       - gpsPosition: GPS measured position
 %       - gpsVelocity: GPS measured velocity
 %       - gpsGroundspeed: GPS measured groundspeed
-%       - gpsCourse: GPS course
-%       - gpsIsUpdated: GPS update status
-%       - gpsSampleTime: GPS sample time
+%       - gpsCourse: GPS course over ground
+%       - gpsIsUpdated: Flag indicating if GPS data is updated
+%       - gpsSampleTime: Timestamp of the GPS measurement
 %
-%   - UWB Sensor Data
-%       - uwbMeasurements: Ranges to UAV neighbors
+%   - UWB Sensor Data:
+%       - uwbMeasurements: UWB range measurements to neighboring UAVs
 %
-%   - Sensor Models
-%       - gps: GPS sensor model
-%       - gpsModule: Mounted GPS sensor
+%   - State Variables:
+%       - uavStateVector: State vector used for estimation [position, velocity, orientation]
+%       - uavCovarianceMatrix: Covariance matrix corresponding to the state vector
+%       - uavStateVectorCI: Fused state vector after Covariance Intersection (CI)
+%       - uavCovarianceMatrixCI: Fused covariance matrix after CI
+%       - uavStateVectorEVCI: Fused state vector after Eigenvalue-based Covariance Intersection (EVCI)
+%       - uavCovarianceMatrixEVCI: Fused covariance matrix after EVCI
 %
-%   - State Variables
-%       - uavStateVector: State vector for estimation
-%       - uavCovarianceMatrix: Covariance matrix for estimation
-%       - uavStateVectorCI: Fused state vector after Covariance Intersection
-%       - uavCovarianceMatrixCI: Fused covariance matrix after Covariance Intersection
+%   - Logging:
+%       - evciReductionMetrics: Cell array storing the number of significant components during EVCI
 %
 % Methods:
 % --------
@@ -59,20 +63,19 @@
 %   - gpsMount: Defines the GPS model and mounts the GPS sensor on the UAV
 %   - gpsConductMeasurement: Reads the GPS sensor measurements
 %   - uwbConductMeasurement: Simulates UWB range measurements from the UAV to its neighbors
-
 %
 % UAV State Functions:
-%   - transformOrientation: Transforms true orientation from quaternion to yaw, pitch, roll angles
-%   - calculateGroundspeed: Calculates true groundspeed from velocity components
-%   - updateNavData: Updates true UAV data in a timestep
+%   - transformOrientation: Transforms the true orientation from quaternion to yaw, pitch, roll angles
+%   - calculateGroundspeed: Calculates the true groundspeed from the velocity components
+%   - updateNavData: Updates the true UAV data in a timestep
 %
 % EKF Functions:
 %   - extendedKalmanFilter: Applies the Extended Kalman Filter update using GPS and UWB measurements
-%   - constructObservationMatrix: Constructs the observation matrix H for EKF
+%   - constructObservationMatrix: Constructs the observation matrix H for the EKF
 %
-% Data fusion functions:
-%   - fuseWithNeighborsCI: Fuses the UAV's state with its neighbors using Covariance Intersection
-%   - fuseWithNeighborsEVCI: Fuses data with neighbors using PCA-based Covariance Intersection
+% Data Fusion Functions:
+%   - fuseWithNeighborsCI: Fuses the UAV's state with its neighbors using Covariance Intersection (CI)
+%   - fuseWithNeighborsEVCI: Fuses data with neighbors using PCA-based Covariance Intersection (EVCI)
 %   - covarianceIntersection: Applies Covariance Intersection to fuse multiple state estimates
 %   - collectNeighborsData: Collects state and covariance data from the UAV's neighbors
 %   - pcaCompression: Performs PCA-based data compression on the covariance matrix
@@ -85,70 +88,63 @@
 % -----
 % This table of contents provides a structured overview of the Drone class for easy reference and navigation.
 % ==========================================================================================================
-
+%
 classdef Drone < handle
     properties
-        % UAV identification properties and scenario variables
-        simulationScene     % Scenario in which UAV operates
-        uavPlatform         % UAV platform (scenario)
+        % UAV Identification and Scenario Variables
+        swarm               % Reference to the Swarm object containing all UAVs
+        swarmParameters     % Parameters related to the swarm
+        uavPlatform         % UAV platform (Swarm scenario element)
         uavFlightData       % UAV platform data in scenario
         uavIndex            % Number of the UAV in the swarm
         uavSI               % Starting index for the UAV's coordinates in the state vector
-        swarm               % Reference to the Swarm object containing all UAVs
-        swarmParameters     % Parameters related to the swarm
 
-        % UAV State
+        % UAV True State
         uavMotionVector     % UAV motion vector with 16 elements
                             % [x y z vx vy vz ax ay az q1 q2 q3 q4 wx wy wz]
+        uavTruePosition     % 3D true position [X, Y, Z]
+        uavTrueVelocity     % 3D true velocity [Vx, Vy, Vz]
+        uavTrueOrientation  % 4-element quaternion vector [q1, q2, q3, q4]
+        uavLLAVector        % 3D position [Latitude, Longitude, Altitude]
+        uavTrueLatitude     % True latitude of the UAV
+        uavTrueLongtitude   % True longtitude of the UAV
+        uavTrueAltitude     % True altitude of the UAV
+        uavTruePitch        % True pitch angle of the UAV
+        uavTrueRoll         % True roll angle of the UAV
+        uavTrueYaw          % True yaw angle of the UAV
+        uavTrueGroundspeed  % True groundspeed of the UAV (calculated from true velocity)
 
-        uavPosition         % 3D position [X, Y, Z]
-        uavVelocity         % 3D velocity [Vx, Vy, Vz]
-        uavOrientation      % 3D orientation [4 elements quaternion vector)
-
-        uavLLAVector        % 3D position [Lat Long Alt]
-        uavLatitude         % UAV true latitude
-        uavLongtitude       % UAV true longitude
-        uavAltitude         % UAV true altitude
-        uavPitch            % UAV true pitch
-        uavRoll             % UAV true roll
-        uavYaw              % UAV true yaw
-        uavGroundspeed      % UAV true groundspeed (calculated from uavOrientation)
-
-        % GPS data acquired with GPS sensor
-        gpsPosition         % GPS position
-        gpsVelocity         % GPS velocity
-        gpsGroundspeed      % GPS groundspeed
-        gpsCourse           % GPS course
-        gpsIsUpdated        % Flag indicating GPS update status
-        gpsSampleTime       % Timestamp of GPS measurement
-
-        % Ranges to the UAV neighbors acquired with UWB sensor [r1 r2 ...]
-        uwbMeasurements     % UWB range measurements to neighbors
-
-        % Sensor Models
-        gps                 % GPS sensor object
-        gpsModule           % UAV sensor module for GPS
+        % GPS Sensor Model
+        gps                 % GPS sensor object (gpsSensor object)
+        gpsModule           % Mounted GPS sensor module (uavSensor object)
         gpsMeasurements     % GPS measurements
         gpsMeasurementsENU  % GPS measurements in ENU coordinates
 
-        % State variables
-        uavStateVector      % UAV state vector for estimation
-        uavCovarianceMatrix % UAV covariance matrix for estimation
+        % GPS Data
+        gpsPosition         % GPS measured position
+        gpsVelocity         % GPS measured velocity
+        gpsGroundspeed      % GPS measured groundspeed
+        gpsCourse           % GPS course over ground
+        gpsIsUpdated        % Flag indicating if GPS data is updated
+        gpsSampleTime       % Timestamp of the GPS measurement
 
-        % Fused state variables for Covariance Intersection (CI)
-        uavStateVectorCI        % UAV state vector using CI
-        uavCovarianceMatrixCI   % UAV covariance matrix using CI
+        % UWB Sensor Data
+        uwbMeasurements     % UWB range measurements to neighboring UAVs
 
-        % Fused state variables for Eigenvalue-based Covariance Intersection (EVCI)
-        uavStateVectorEVCI          % UAV state vector using EVCI
-        uavCovarianceMatrixEVCI     % UAV covariance matrix using EVCI
+        % State Variables
+        uavStateVector          % State vector used for estimation
+        uavCovarianceMatrix     % Covariance matrix corresponding to the state vector
 
-        % Temporary state variables for logging data reduction metrics during EVCI
-        uavStateVectorTMP           % Temporary state vector for EVCI
-        uavCovarianceMatrixTMP      % Temporary covariance matrix for EVCI
+        % Fused State Variables for Covariance Intersection (CI)
+        uavStateVectorCI        % Fused state vector after Covariance Intersection (CI)
+        uavCovarianceMatrixCI   % Fused covariance matrix after CI
 
-        % Logging variable for EVCI data reduction metrics
-        evciReductionMetrics    % Cell array to store number of significant components during EVCI
+        % Fused State Variables for Eigenvalue-based Covariance Intersection (EVCI)
+        uavStateVectorEVCI      % Fused state vector after Eigenvalue-based Covariance Intersection (EVCI)
+        uavCovarianceMatrixEVCI % Fused covariance matrix after EVCI
+
+        % Logging Variables
+        evciReductionMetrics % Cell array storing the number of significant components during EVCI
     end
 
     methods
@@ -170,14 +166,14 @@ classdef Drone < handle
             [self.uavMotionVector, self.uavLLAVector] = read(self.uavPlatform);
 
             % Extract position, velocity, and orientation from motion vector
-            self.uavPosition = self.uavMotionVector(1, 1:3);
-            self.uavVelocity = self.uavMotionVector(1, 4:6);
-            self.uavOrientation = self.uavMotionVector(1, 10:13);
+            self.uavTruePosition = self.uavMotionVector(1, 1:3);
+            self.uavTrueVelocity = self.uavMotionVector(1, 4:6);
+            self.uavTrueOrientation = self.uavMotionVector(1, 10:13);
 
             % Extract latitude, longitude, altitude from LLA vector
-            self.uavLatitude = self.uavLLAVector(1);
-            self.uavLongtitude = self.uavLLAVector(2);
-            self.uavAltitude = self.uavLLAVector(3);
+            self.uavTrueLatitude = self.uavLLAVector(1);
+            self.uavTrueLongtitude = self.uavLLAVector(2);
+            self.uavTrueAltitude = self.uavLLAVector(3);
 
             % Convert orientation from quaternion to yaw, pitch, roll
             self.transformOrientation();
@@ -190,7 +186,7 @@ classdef Drone < handle
             self.uavCovarianceMatrix = eye(self.swarmParameters.nbAgents * 3) * 1000;
 
             % Set initial position in state vector
-            self.uavStateVector(self.uavSI:self.uavSI+2) = self.uavPosition';
+            self.uavStateVector(self.uavSI:self.uavSI+2) = self.uavTruePosition';
 
             % Initialize CI and EVCI state vectors and covariance matrices
             self.uavStateVectorCI = self.uavStateVector;
@@ -200,7 +196,7 @@ classdef Drone < handle
             self.uavCovarianceMatrixEVCI = self.uavCovarianceMatrix;
 
             % Update UAV platform mesh with initial orientation and position
-            updateMesh(self.uavPlatform, "quadrotor", {10}, [1 0 0], self.uavPosition, self.uavOrientation);
+            updateMesh(self.uavPlatform, "quadrotor", {10}, [1 0 0], self.uavTruePosition, self.uavTrueOrientation);
         end
         %%%%%%%%%% End Constructor %%%%%%%%%%%%
 
@@ -254,7 +250,7 @@ classdef Drone < handle
         %  Output: gpsMeasurementsENU - ENU [x y z] coordinates
         function gpsToENU(self, gpsCoordinates)
 
-            refCoordinates = self.swarm.simulationScene.ReferenceLocation;
+            refCoordinates = self.swarm.swarmSimulationScene.ReferenceLocation;
             % refCoordinates and gpsCoordinates are vectors [lat, lon, alt]
             latRef = refCoordinates(1);
             lonRef = refCoordinates(2);
@@ -301,18 +297,18 @@ classdef Drone < handle
             measurementError = 0;
 
             % Coordinates of the UAV conducting the measurements
-            x = self.swarm.truePositions((self.uavIndex-1)*3 + 1);
-            y = self.swarm.truePositions((self.uavIndex-1)*3 + 2);
-            z = self.swarm.truePositions((self.uavIndex-1)*3 + 3);
+            x = self.swarm.swarmTruePositions((self.uavIndex-1)*3 + 1);
+            y = self.swarm.swarmTruePositions((self.uavIndex-1)*3 + 2);
+            z = self.swarm.swarmTruePositions((self.uavIndex-1)*3 + 3);
 
             % Calculate the range to each neighbor
             for i = 1:length(selfNeighbors)
                 neighborIndex = selfNeighbors(i);
 
                 % Coordinates of the neighbor UAV
-                x_other = self.swarm.truePositions((neighborIndex-1)*3 + 1);
-                y_other = self.swarm.truePositions((neighborIndex-1)*3 + 2);
-                z_other = self.swarm.truePositions((neighborIndex-1)*3 + 3);
+                x_other = self.swarm.swarmTruePositions((neighborIndex-1)*3 + 1);
+                y_other = self.swarm.swarmTruePositions((neighborIndex-1)*3 + 2);
+                z_other = self.swarm.swarmTruePositions((neighborIndex-1)*3 + 3);
 
                 % Calculate true range
                 trueRange = sqrt((x - x_other)^2 + (y - y_other)^2 + (z - z_other)^2);
@@ -330,15 +326,15 @@ classdef Drone < handle
         %  the UAV from quaternion (uavOrientation) to yaw, pitch, roll angles
         %  Output: uavYaw, uawPitch, uavRoll
         function transformOrientation(self)
-            [self.uavYaw, self.uavPitch, self.uavRoll] = ...
-                quat2angle(self.uavOrientation);
+            [self.uavTrueYaw, self.uavTruePitch, self.uavTrueRoll] = ...
+                quat2angle(self.uavTrueOrientation);
         end
 
         %% Function which is resposnible for calculating true groudspeed of
         %  the UAV from velocities components in xyz dimensions
         %  Output: uavGroundspeed*
         function calculateGroundspeed(self)
-            self.uavGroundspeed = sqrt(sum(self.uavVelocity.^2));
+            self.uavTrueGroundspeed = sqrt(sum(self.uavTrueVelocity.^2));
         end
 
         %% Function responsible for updating true data of the UAV in a timestep
@@ -347,13 +343,13 @@ classdef Drone < handle
         %  uawPitch, uavRoll, uavGroudspeed
         function updateNavData(self)
             [self.uavMotionVector,self.uavLLAVector] = read(self.uavPlatform);
-            self.uavPosition = self.uavMotionVector(1,1:3);
-            self.uavVelocity = self.uavMotionVector(1,4:6);
-            self.uavOrientation = self.uavMotionVector(1,10:13);
+            self.uavTruePosition = self.uavMotionVector(1,1:3);
+            self.uavTrueVelocity = self.uavMotionVector(1,4:6);
+            self.uavTrueOrientation = self.uavMotionVector(1,10:13);
 
-            self.uavLatitude = self.uavLLAVector(1);
-            self.uavLongtitude = self.uavLLAVector(2);
-            self.uavAltitude = self.uavLLAVector(3);
+            self.uavTrueLatitude = self.uavLLAVector(1);
+            self.uavTrueLongtitude = self.uavLLAVector(2);
+            self.uavTrueAltitude = self.uavLLAVector(3);
 
             self.transformOrientation();
             self.calculateGroundspeed();
@@ -496,12 +492,12 @@ classdef Drone < handle
         %% Funtion which conducts data fusion using classic Covariance Intersection algorithm
         %  Dependency: collectNeighborsData() - gather state and covariance from neighbors
         %  covaraianceIntersection() - conduct CI with ulaltered dataset
-        function fuseWithNeighborsCI(self)
+        function [fusedState, fusedCovariance] = fuseWithNeighborsCI(self)
 
             % Get the indices of the neighbors
             neighborIndices = self.swarm.swarmInnerConnections{self.uavIndex};
             if ~isempty(neighborIndices)
-                swarmWeights = self.swarm.metropolisWeights{self.uavIndex};
+                swarmWeights = self.swarm.swarmMetropolisWeights{self.uavIndex};
 
                 % Initialize cell arrays to store states and covariances
                 neighborsData.stateVectors = cell(1, length(neighborIndices) + 1);
@@ -522,22 +518,18 @@ classdef Drone < handle
 
                 % Apply Covariance Intersection
                 [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData);
-
-                % Update own state and covariance with the fused values
-                self.uavStateVectorTMP = fusedState;
-                self.uavCovarianceMatrixTMP = fusedCovariance;
             end
         end
 
         %% Funtion which conducts data fusion using EVCI algorithm
         %  Dependency: pcaCompression() - conduct PCA compression and data reduction
         %  covaraianceIntersection() - conduct CI with prepared dataset
-        function fuseWithNeighborsEVCI(self)
+        function [fusedState, fusedCovariance] = fuseWithNeighborsEVCI(self)
 
             % Get the indices of the neighbors
             neighborIndices = self.swarm.swarmInnerConnections{self.uavIndex};
             if ~isempty(neighborIndices)
-                swarmWeights = self.swarm.metropolisWeights{self.uavIndex};
+                swarmWeights = self.swarm.swarmMetropolisWeights{self.uavIndex};
 
                 % Initialize cell arrays to store states and covariances
                 neighborsData.stateVectors = cell(1, length(neighborIndices) + 1);
@@ -557,8 +549,9 @@ classdef Drone < handle
                     neighborDrone = self.swarm.UAVs(neighborIndex); % Access the neighbor UAV
 
                     % Step 1: Compress the neighbor's data
-                    [transmittedMatrix, transmittedEigenvalues] = neighborDrone.pcaCompression(reductionThreshold);
-
+                    [transmittedMatrix, transmittedEigenvalues] = ...
+                        neighborDrone.pcaCompression(self.swarm.swarmParameters.evciReductionThreshold);
+                    
                     % Step 2: Simulate transmission and reception
                     receivedMatrix = transmittedMatrix;
 
@@ -584,9 +577,6 @@ classdef Drone < handle
                 % Perform Covariance Intersection or other fusion with valid data
                 if dataToBeFused == true
                     [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData);
-                    % Update own state and covariance with the fused values
-                    self.uavStateVectorTMP = fusedState;
-                    self.uavCovarianceMatrixTMP = fusedCovariance;
                 end
             end
         end
@@ -660,7 +650,8 @@ classdef Drone < handle
 
             % Perform PCA on the covariance matrix
             [pcaCoefficients,pcaEigenvalues] = pcacov(covarianceMatrix);
-
+            
+            pcaEigenvalues
             % Determine the number of components to retain
             numSignificant = sum(pcaEigenvalues > reductionThreshold);
 

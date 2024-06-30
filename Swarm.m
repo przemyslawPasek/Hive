@@ -6,9 +6,10 @@
 %
 % Properties:
 % -----------
-%   - Swarm Scenario and Structure:
-%       - scenarioData: Flight data of the swarm
-%       - simulationScene: Scenario in which the swarm operates
+%   - Swarm Scenario, Structure and Parameters:
+%       - swarmFlightData: Flight data of the swarm
+%       - swarmSimulationScene: Scenario in which the swarm operates
+%       - swarmParameters: Struct containing parameters related to the swarm
 %       - nbAgents: Number of UAVs in the scenario
 %       - UAVs: Vector of Drone objects in the swarm
 %
@@ -18,8 +19,7 @@
 %       - swarmInnerConnections: Cell array holding neighbors' indices for each UAV
 %       - metropolisWeights: Cell array of Metropolis weights for each UAV
 %
-%   - Swarm Simulation Parameters and Simulation Output:
-%       - swarmParameters: Struct containing parameters related to the swarm
+%   - Swarm Simulation Output:
 %       - loggedData: Struct containing logged estimation data
 %       - processedData: Struct containing processed data with calculated metrics
 %       - timeStep: Current time in the simulation
@@ -72,61 +72,61 @@ classdef Swarm < handle
     % SWARM - This class represents an ensemble of dynamic UAVs
 
     properties
-        scenarioData         % Flight data of the swarm
-        simulationScene      % Scenario in which Swarm operates
-        nbAgents             % Number of UAVs in the scenario
-        UAVs                 % A vector of Drone objects
+        swarmFlightData         % Flight data of the swarm
+        swarmSimulationScene    % Scenario in which Swarm operates
+        swarmParameters         % Struct containing parameters related to the swarm
 
-        trueLLAPositions     % Vector containing LLA positions of each UAV
-        truePositions        % Vector containing true scenario positions of each UAV
-        swarmInnerConnections % Cell array to hold neighbors' indices for each UAV
-        metropolisWeights    % Cell array of Metropolis weights for each UAV
+        swarmNbAgents           % Number of UAVs in the scenario
+        UAVs                    % A vector of Drone objects
 
-        swarmParameters      % Struct containing parameters related to the swarm
-        loggedData           % Struct containing logged estimation data
-        processedData        % Struct containing processed data with calculated metrics
-        timeStep             % Current time in the simulation
+        swarmTrueLLAPositions   % Vector containing LLA positions of each UAV
+        swarmTruePositions      % Vector containing true scenario positions of each UAV
+        swarmInnerConnections   % Cell array to hold neighbors' indices for each UAV
+        swarmMetropolisWeights  % Cell array of Metropolis weights for each UAV
+
+        simLoggedData           % Struct containing logged estimation data
+        simProcessedData        % Struct containing processed data with calculated metrics
+        simTimeStep             % Current time in the simulation
     end
 
     methods
         %%%%%%%%%% Constructor %%%%%%%%%%%%
         function self = Swarm(scenarioData)
-            % Swarm - Initializes the Swarm object
-            %
-            %   Inputs:
-            %       scenarioData: Flight data and parameters for the swarm
-            %
 
             % Initialize scenario data and simulation scene
-            self.scenarioData = scenarioData;
-            self.simulationScene = uavScenario(UpdateRate=scenarioData.UpdateRate, ...
+            self.swarmFlightData = scenarioData;
+            self.swarmSimulationScene = uavScenario(UpdateRate=scenarioData.UpdateRate, ...
                 ReferenceLocation=scenarioData.ReferenceLocation, ...
-                StopTime=scenarioData.StopTime);
-            self.nbAgents = length(scenarioData.Platforms);
+                StopTime=scenarioData.StopTime,MaxNumFrames=20);
+            self.swarmNbAgents = length(scenarioData.Platforms);
 
             % Initialize arrays and structures
             self.UAVs = [];
-            self.trueLLAPositions = [];
-            self.truePositions = [];
-            self.swarmInnerConnections = cell(1, self.nbAgents);
-            self.metropolisWeights = cell(1, self.nbAgents);
-            self.swarmParameters = struct();
-            self.swarmParameters.nbAgents = self.nbAgents;
+            self.swarmTrueLLAPositions = [];
+            self.swarmTruePositions = [];
+            self.swarmInnerConnections = cell(1, self.swarmNbAgents);
+            self.swarmMetropolisWeights = cell(1, self.swarmNbAgents);
+            
+            % Initialize swarm parameters structure
+            self.swarmParameters = repmat(struct('nbAgents', [], ...
+                'maxCommunicationRange', [], ...
+                'evciReductionThreshold', []),1);
+
+            self.swarmParameters.nbAgents = self.swarmNbAgents;
             self.swarmParameters.maxRange = 100;
-            self.swarmParameters.evciReductionThreshold = 1000;
-            self.timeStep = self.simulationScene.CurrentTime;
+            self.swarmParameters.evciReductionThreshold = 100;
 
             % Initialize logged data structure
-            self.loggedData = repmat(struct('trueState', [], ...
+            self.simLoggedData = repmat(struct('trueState', [], ...
                 'estimatedState', [], ...
                 'estimatedStateCI', [], ...
                 'estimatedStateEVCI', [], ...
                 'estimatedCovariance', [], ...
                 'estimatedCovarianceCI', [], ...
-                'estimatedCovarianceEVCI', []), 1, self.nbAgents);
+                'estimatedCovarianceEVCI', []), 1, self.swarmNbAgents);
 
             % Initialize processed data structure
-            self.processedData = repmat(struct('rmseEKF', [], ...
+            self.simProcessedData = repmat(struct('rmseEKF', [], ...
                 'rmseCI', [], ...
                 'rmseEVCI', [], ...
                 'ateEKF', [], ...
@@ -138,15 +138,15 @@ classdef Swarm < handle
                 'nisEKF', [], ...
                 'nisCI', [], ...
                 'nisEVCI', [], ...
-                'reducedVectors',[]), 1, self.nbAgents);
+                'reducedVectors',[]), 1, self.swarmNbAgents);
 
             % Initialize UAVs and their positions
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 uavFlightData = scenarioData.Platforms(uavIndex);
-                UAV = Drone(self.simulationScene, uavFlightData, self, self.swarmParameters);
+                UAV = Drone(self.swarmSimulationScene, uavFlightData, self, self.swarmParameters);
                 self.UAVs = [self.UAVs UAV];
-                self.trueLLAPositions = [self.trueLLAPositions UAV.uavLLAVector];
-                self.truePositions = [self.truePositions UAV.uavPosition];
+                self.swarmTrueLLAPositions = [self.swarmTrueLLAPositions UAV.uavLLAVector];
+                self.swarmTruePositions = [self.swarmTruePositions UAV.uavTruePosition];
             end
 
             % Mount GPS sensor on each UAV
@@ -154,13 +154,17 @@ classdef Swarm < handle
 
             % Determine initial neighbors' connections
             self.determineInnerConnections();
+
+            % Update simulation time
+            self.simTimeStep = self.swarmSimulationScene.CurrentTime;
+
         end
         %%%%%%%%%% End Constructor %%%%%%%%%%%%
 
         %% Function which is responsible for definining GPS model and
         %  mounting GPS sensor on each UAV in the Swarm
         function gpsMount(self)
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 self.UAVs(uavIndex).gpsMount();
             end
         end
@@ -168,7 +172,7 @@ classdef Swarm < handle
         %% Function which is responsible for reading GSP sensor measurements
         %  from each UAV in the Swarm
         function gpsConductMeasurement(self)
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 self.UAVs(uavIndex).gpsConductMeasurement();
             end
         end
@@ -176,23 +180,23 @@ classdef Swarm < handle
         %% Function which is responsible for reading UWB sensor measurements
         %  from each UAV in the Swarm
         function uwbConductMeasurement(self)
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 self.UAVs(uavIndex).uwbConductMeasurement();
             end
         end
 
         %% Function responsible for updating true data of the UAVs in a timestep
         function updateNavData(self)
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 self.UAVs(uavIndex).updateNavData();
-                self.timeStep = self.simulationScene.CurrentTime;
+                self.simTimeStep = self.swarmSimulationScene.CurrentTime;
             end
         end
 
         %% Function for checking if the motion of the UAVs ended (based on
         %  the motion of the single, chosen UAV)
         function motionEnded = checkMotionEnded(self)
-            if self.simulationScene.CurrentTime >= self.UAVs(1).uavPlatform.Trajectory.TimeOfArrival(end)
+            if self.swarmSimulationScene.CurrentTime >= self.UAVs(1).uavPlatform.Trajectory.TimeOfArrival(end)
                 motionEnded = 1;
             else
                 motionEnded = 0;
@@ -203,23 +207,23 @@ classdef Swarm < handle
         %  uavIndex: Index of the UAV to check vicinity for (1-based index)
         %  maxRange: Maximum range to consider another UAV as a neighbor
         function determineInnerConnections(self)
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
 
                 % Initialize neighbors vector
                 neighbors = [];
 
                 % Coordinates of the UAV to check
-                x = self.truePositions((uavIndex-1)*3 + 1);
-                y = self.truePositions((uavIndex-1)*3 + 2);
-                z = self.truePositions((uavIndex-1)*3 + 3);
+                x = self.swarmTruePositions((uavIndex-1)*3 + 1);
+                y = self.swarmTruePositions((uavIndex-1)*3 + 2);
+                z = self.swarmTruePositions((uavIndex-1)*3 + 3);
 
                 % Loop through all other UAVs to find neighbors within maxRange
-                for i = 1:(length(self.truePositions) / 3)
+                for i = 1:(length(self.swarmTruePositions) / 3)
                     if i ~= uavIndex
                         % Coordinates of the other UAV
-                        x_other = self.truePositions((i-1)*3 + 1);
-                        y_other = self.truePositions((i-1)*3 + 2);
-                        z_other = self.truePositions((i-1)*3 + 3);
+                        x_other = self.swarmTruePositions((i-1)*3 + 1);
+                        y_other = self.swarmTruePositions((i-1)*3 + 2);
+                        z_other = self.swarmTruePositions((i-1)*3 + 3);
 
                         % Calculate Euclidean distance
                         distance = sqrt((x - x_other)^2 + (y - y_other)^2 + (z - z_other)^2);
@@ -238,18 +242,18 @@ classdef Swarm < handle
         %  uavIndex: Index of the UAV to update (1-based index)
         %  newPosition: New [Lat Long Alt] position of the UAV
         function updateTruePositions(self)
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 % Update the true positions [Lat Long Alt]
                 newLLAPosition = self.UAVs(uavIndex).uavLLAVector;
-                self.trueLLAPositions((uavIndex-1)*3 + 1) = newLLAPosition(1);
-                self.trueLLAPositions((uavIndex-1)*3 + 2) = newLLAPosition(2);
-                self.trueLLAPositions((uavIndex-1)*3 + 3) = newLLAPosition(3);
+                self.swarmTrueLLAPositions((uavIndex-1)*3 + 1) = newLLAPosition(1);
+                self.swarmTrueLLAPositions((uavIndex-1)*3 + 2) = newLLAPosition(2);
+                self.swarmTrueLLAPositions((uavIndex-1)*3 + 3) = newLLAPosition(3);
 
                 % Update the true scenario positions [x y z]
-                newPosition = self.UAVs(uavIndex).uavPosition;
-                self.truePositions((uavIndex-1)*3 + 1) = newPosition(1);
-                self.truePositions((uavIndex-1)*3 + 2) = newPosition(2);
-                self.truePositions((uavIndex-1)*3 + 3) = newPosition(3);
+                newPosition = self.UAVs(uavIndex).uavTruePosition;
+                self.swarmTruePositions((uavIndex-1)*3 + 1) = newPosition(1);
+                self.swarmTruePositions((uavIndex-1)*3 + 2) = newPosition(2);
+                self.swarmTruePositions((uavIndex-1)*3 + 3) = newPosition(3);
             end
             % Update neighbors' information for all UAVs
             self.determineInnerConnections();
@@ -262,7 +266,7 @@ classdef Swarm < handle
         %  GPS and UWB measurements are carried out before and passed as an
         %  input
         function extendedKalmanFilter(self)
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 self.UAVs(uavIndex).extendedKalmanFilter('None');
                 self.UAVs(uavIndex).extendedKalmanFilter('CI');
                 self.UAVs(uavIndex).extendedKalmanFilter('EVCI');
@@ -273,16 +277,16 @@ classdef Swarm < handle
         %  Output: metropolisWeights - cell array for each UAV
         function calculateMetropolisWeights(self)
             % Initialize the Metropolis weights cell array
-            self.metropolisWeights = cell(1, self.nbAgents);
+            self.swarmMetropolisWeights = cell(1, self.swarmNbAgents);
 
             % Iterate over each UAV
-            for i = 1:self.nbAgents
+            for i = 1:self.swarmNbAgents
                 % Get the list of neighbors for the current UAV
                 neighborsList = self.swarmInnerConnections{i};
                 numNeighbors = length(neighborsList);
 
                 % Initialize weight vector for the current UAV
-                weights = zeros(1, self.nbAgents);
+                weights = zeros(1, self.swarmNbAgents);
 
                 % Special case: if there are no neighbors, the weight is 1 for itself
                 if numNeighbors == 0
@@ -302,7 +306,7 @@ classdef Swarm < handle
                 end
 
                 % Store the weights for the current UAV
-                self.metropolisWeights{i} = weights;
+                self.swarmMetropolisWeights{i} = weights;
             end
         end
 
@@ -324,13 +328,13 @@ classdef Swarm < handle
 
         %% Data fusion with UAVs around - collects data from nieghbors and fuse using CI
         function fuseWithNeighborsCI(self)
-            for uavIndex = 1:self.nbAgents
-                self.UAVs(uavIndex).fuseWithNeighborsCI();
+            for uavIndex = 1:self.swarmNbAgents
+                [fusedState, fusedCovariance] = self.UAVs(uavIndex).fuseWithNeighborsCI();
             end
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 if ~isempty(self.swarmInnerConnections{uavIndex})
-                    self.UAVs(uavIndex).uavStateVectorCI = self.UAVs(uavIndex).uavStateVectorTMP;
-                    self.UAVs(uavIndex).uavCovarianceMatrixCI = self.UAVs(uavIndex).uavCovarianceMatrixTMP;
+                    self.UAVs(uavIndex).uavStateVectorCI = fusedState;
+                    self.UAVs(uavIndex).uavCovarianceMatrixCI = fusedCovariance;
                 end
             end
         end
@@ -338,13 +342,13 @@ classdef Swarm < handle
         %% Data fusion with UAVs around - collects data from nieghbors using
         %  eigenvalue decomposition and data reduction, then fuse using CI
         function fuseWithNeighborsEVCI(self)
-            for uavIndex = 1:self.nbAgents
-                self.UAVs(uavIndex).fuseWithNeighborsEVCI();
+            for uavIndex = 1:self.swarmNbAgents
+                [fusedState, fusedCovariance] = self.UAVs(uavIndex).fuseWithNeighborsEVCI();
             end
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 if ~isempty(self.swarmInnerConnections{uavIndex})
-                    self.UAVs(uavIndex).uavStateVectorEVCI = self.UAVs(uavIndex).uavStateVectorTMP;
-                    self.UAVs(uavIndex).uavCovarianceMatrixEVCI = self.UAVs(uavIndex).uavCovarianceMatrixTMP;
+                    self.UAVs(uavIndex).uavStateVectorEVCI = fusedState;
+                    self.UAVs(uavIndex).uavCovarianceMatrixEVCI = fusedCovariance;
                 end
             end
         end
@@ -352,64 +356,64 @@ classdef Swarm < handle
         %% Method to log data for each UAV at each time step
         %  Output: loggedData struct
         function logUAVData(self)
-            for uavIndex = 1:self.nbAgents
-                self.loggedData(uavIndex).trueState(:, self.timeStep) = self.truePositions;
-                self.loggedData(uavIndex).estimatedState(:, self.timeStep) = self.UAVs(uavIndex).uavStateVector;
-                self.loggedData(uavIndex).estimatedStateCI(:, self.timeStep) = self.UAVs(uavIndex).uavStateVectorCI;
-                self.loggedData(uavIndex).estimatedStateEVCI(:, self.timeStep) = self.UAVs(uavIndex).uavStateVectorEVCI;
-                self.loggedData(uavIndex).estimatedCovariance(:, :, self.timeStep) = self.UAVs(uavIndex).uavCovarianceMatrix;
-                self.loggedData(uavIndex).estimatedCovarianceCI(:, :, self.timeStep) = self.UAVs(uavIndex).uavCovarianceMatrixCI;
-                self.loggedData(uavIndex).estimatedCovarianceEVCI(:, :, self.timeStep) = self.UAVs(uavIndex).uavCovarianceMatrixEVCI;
+            for uavIndex = 1:self.swarmNbAgents
+                self.simLoggedData(uavIndex).trueState(:, self.simTimeStep) = self.swarmTruePositions;
+                self.simLoggedData(uavIndex).estimatedState(:, self.simTimeStep) = self.UAVs(uavIndex).uavStateVector;
+                self.simLoggedData(uavIndex).estimatedStateCI(:, self.simTimeStep) = self.UAVs(uavIndex).uavStateVectorCI;
+                self.simLoggedData(uavIndex).estimatedStateEVCI(:, self.simTimeStep) = self.UAVs(uavIndex).uavStateVectorEVCI;
+                self.simLoggedData(uavIndex).estimatedCovariance(:, :, self.simTimeStep) = self.UAVs(uavIndex).uavCovarianceMatrix;
+                self.simLoggedData(uavIndex).estimatedCovarianceCI(:, :, self.simTimeStep) = self.UAVs(uavIndex).uavCovarianceMatrixCI;
+                self.simLoggedData(uavIndex).estimatedCovarianceEVCI(:, :, self.simTimeStep) = self.UAVs(uavIndex).uavCovarianceMatrixEVCI;
             end
         end
 
         %% Function to calculate metrics comparing no data fusion, CI and EVCI
         function calculateMetrics(self)
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
 
                 % Extract true and estimated states
-                trueState = self.loggedData(uavIndex).trueState;
-                estimatedState = self.loggedData(uavIndex).estimatedState;
-                estimatedStateCI = self.loggedData(uavIndex).estimatedStateCI;
-                estimatedStateEVCI = self.loggedData(uavIndex).estimatedStateEVCI;
+                trueState = self.simLoggedData(uavIndex).trueState;
+                estimatedState = self.simLoggedData(uavIndex).estimatedState;
+                estimatedStateCI = self.simLoggedData(uavIndex).estimatedStateCI;
+                estimatedStateEVCI = self.simLoggedData(uavIndex).estimatedStateEVCI;
 
                 % Calculate RMSE for each method
-                self.processedData(uavIndex).rmseEKF = sqrt(mean((trueState - estimatedState).^2, 1));
-                self.processedData(uavIndex).rmseCI = sqrt(mean((trueState - estimatedStateCI).^2, 1));
-                self.processedData(uavIndex).rmseEVCI = sqrt(mean((trueState - estimatedStateEVCI).^2, 1));
+                self.simProcessedData(uavIndex).rmseEKF = sqrt(mean((trueState - estimatedState).^2, 1));
+                self.simProcessedData(uavIndex).rmseCI = sqrt(mean((trueState - estimatedStateCI).^2, 1));
+                self.simProcessedData(uavIndex).rmseEVCI = sqrt(mean((trueState - estimatedStateEVCI).^2, 1));
 
                 % Calculate ATE for each method
-                self.processedData(uavIndex).ateEKF = sqrt(sum((trueState - estimatedState).^2, 1));
-                self.processedData(uavIndex).ateCI = sqrt(sum((trueState - estimatedStateCI).^2, 1));
-                self.processedData(uavIndex).ateEVCI = sqrt(sum((trueState - estimatedStateEVCI).^2, 1));
+                self.simProcessedData(uavIndex).ateEKF = sqrt(sum((trueState - estimatedState).^2, 1));
+                self.simProcessedData(uavIndex).ateCI = sqrt(sum((trueState - estimatedStateCI).^2, 1));
+                self.simProcessedData(uavIndex).ateEVCI = sqrt(sum((trueState - estimatedStateEVCI).^2, 1));
 
                 % Calculate RPE for each method
-                if self.timeStep > 1
-                    for t = 2:self.timeStep
+                if self.simTimeStep > 1
+                    for t = 2:self.simTimeStep
                         deltaTrue = trueState(:, t) - trueState(:, t-1);
                         deltaEKF = estimatedState(:, t) - estimatedState(:, t-1);
                         deltaCI = estimatedStateCI(:, t) - estimatedStateCI(:, t-1);
                         deltaEVCI = estimatedStateEVCI(:, t) - estimatedStateEVCI(:, t-1);
 
-                        self.processedData(uavIndex).rpeEKF(t-1) = sqrt(sum((deltaTrue - deltaEKF).^2));
-                        self.processedData(uavIndex).rpeCI(t-1) = sqrt(sum((deltaTrue - deltaCI).^2));
-                        self.processedData(uavIndex).rpeEVCI(t-1) = sqrt(sum((deltaTrue - deltaEVCI).^2));
+                        self.simProcessedData(uavIndex).rpeEKF(t-1) = sqrt(sum((deltaTrue - deltaEKF).^2));
+                        self.simProcessedData(uavIndex).rpeCI(t-1) = sqrt(sum((deltaTrue - deltaCI).^2));
+                        self.simProcessedData(uavIndex).rpeEVCI(t-1) = sqrt(sum((deltaTrue - deltaEVCI).^2));
                     end
                 end
 
                 % Calculate NIS for each method
-                for t = 1:self.timeStep
-                    P_EKF = self.loggedData(uavIndex).estimatedCovariance(:, :, t);
-                    P_CI = self.loggedData(uavIndex).estimatedCovarianceCI(:, :, t);
-                    P_EVCI = self.loggedData(uavIndex).estimatedCovarianceEVCI(:, :, t);
+                for t = 1:self.simTimeStep
+                    P_EKF = self.simLoggedData(uavIndex).estimatedCovariance(:, :, t);
+                    P_CI = self.simLoggedData(uavIndex).estimatedCovarianceCI(:, :, t);
+                    P_EVCI = self.simLoggedData(uavIndex).estimatedCovarianceEVCI(:, :, t);
 
                     innovationEKF = trueState(:, t) - estimatedState(:, t);
                     innovationCI = trueState(:, t) - estimatedStateCI(:, t);
                     innovationEVCI = trueState(:, t) - estimatedStateEVCI(:, t);
 
-                    self.processedData(uavIndex).nisEKF(t) = innovationEKF' / P_EKF * innovationEKF;
-                    self.processedData(uavIndex).nisCI(t) = innovationCI' / P_CI * innovationCI;
-                    self.processedData(uavIndex).nisEVCI(t) = innovationEVCI' / P_EVCI * innovationEVCI;
+                    self.simProcessedData(uavIndex).nisEKF(t) = innovationEKF' / P_EKF * innovationEKF;
+                    self.simProcessedData(uavIndex).nisCI(t) = innovationCI' / P_CI * innovationCI;
+                    self.simProcessedData(uavIndex).nisEVCI(t) = innovationEVCI' / P_EVCI * innovationEVCI;
                 end
             end
         end
@@ -417,16 +421,22 @@ classdef Swarm < handle
         %% Method to plot RMSE
         function plotRMSE(self)
             figure;
+            set(gcf,'color','w')
             hold on;
-            for uavIndex = 1:self.nbAgents
+            color = {[0.75 0.25 0.2]; [0.6 0.8 1]};
+            for uavIndex = 1:self.swarmNbAgents
                 % plot(self.processedData(uavIndex).rmseEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
-                plot(self.processedData(uavIndex).rmseCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
-                plot(self.processedData(uavIndex).rmseEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
+                plot(self.simProcessedData(uavIndex).rmseCI, 'DisplayName',...
+                    ['UAV ' num2str(uavIndex) ' CI'],'Color',color{1}','LineWidth', 4);
+                plot(self.simProcessedData(uavIndex).rmseEVCI, 'DisplayName',...
+                    ['UAV ' num2str(uavIndex) ' EVCI'],'Color',color{2},'LineWidth', 4);
             end
             xlabel('Time Step');
             ylabel('RMSE');
+            title("RMSE Over Time ","FontSize",14);
+            subtitle("Threshold: " + self.swarmParameters.evciReductionThreshold,...
+                "FontWeight","normal" );
             legend('show');
-            title('RMSE Comparison');
             grid on;
         end
 
@@ -434,10 +444,10 @@ classdef Swarm < handle
         function plotATE(self)
             figure;
             hold on;
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 % plot(self.processedData(uavIndex).ateEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
-                plot(self.processedData(uavIndex).ateCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
-                plot(self.processedData(uavIndex).ateEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
+                plot(self.simProcessedData(uavIndex).ateCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
+                plot(self.simProcessedData(uavIndex).ateEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
             end
             xlabel('Time Step');
             ylabel('ATE');
@@ -450,10 +460,10 @@ classdef Swarm < handle
         function plotRPE(self)
             figure;
             hold on;
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 % plot(self.processedData(uavIndex).rpeEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
-                plot(self.processedData(uavIndex).rpeCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
-                plot(self.processedData(uavIndex).rpeEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
+                plot(self.simProcessedData(uavIndex).rpeCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
+                plot(self.simProcessedData(uavIndex).rpeEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
             end
             xlabel('Time Step');
             ylabel('RPE');
@@ -466,10 +476,10 @@ classdef Swarm < handle
         function plotNIS(self)
             figure;
             hold on;
-            for uavIndex = 1:self.nbAgents
+            for uavIndex = 1:self.swarmNbAgents
                 % plot(self.processedData(uavIndex).nisEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
-                plot(self.processedData(uavIndex).nisCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
-                plot(self.processedData(uavIndex).nisEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
+                plot(self.simProcessedData(uavIndex).nisCI, 'g', 'DisplayName', ['UAV ' num2str(uavIndex) ' CI']);
+                plot(self.simProcessedData(uavIndex).nisEVCI, 'b', 'DisplayName', ['UAV ' num2str(uavIndex) ' EVCI']);
             end
             xlabel('Time Step');
             ylabel('NIS');
@@ -480,8 +490,8 @@ classdef Swarm < handle
 
         %% Method to plot swarm estimations from the perspective of a specific UAV
         function plotSwarmEstimations(self, uavIndex)
-            if uavIndex < 1 || uavIndex > self.nbAgents
-                error('Invalid UAV index. Must be between 1 and %d.', self.nbAgents);
+            if uavIndex < 1 || uavIndex > self.swarmNbAgents
+                error('Invalid UAV index. Must be between 1 and %d.', self.swarmNbAgents);
             end
 
             % Initialize figure
@@ -489,14 +499,14 @@ classdef Swarm < handle
             hold on;
 
             % Iterate over each UAV to plot their trajectories
-            for agentIndex = 1:self.nbAgents
+            for agentIndex = 1:self.swarmNbAgents
                 % Extract true positions for the current UAV
-                plotTruePositions = self.loggedData(agentIndex).trueState((agentIndex-1)*3 + (1:3), :);
+                plotTruePositions = self.simLoggedData(agentIndex).trueState((agentIndex-1)*3 + (1:3), :);
 
                 % Extract estimated positions from the perspective of uavIndex
-                estimatedPositionsEKF = self.loggedData(uavIndex).estimatedState((agentIndex-1)*3 + (1:3), :);
-                estimatedPositionsCI = self.loggedData(uavIndex).estimatedStateCI((agentIndex-1)*3 + (1:3), :);
-                estimatedPositionsEVCI = self.loggedData(uavIndex).estimatedStateEVCI((agentIndex-1)*3 + (1:3), :);
+                estimatedPositionsEKF = self.simLoggedData(uavIndex).estimatedState((agentIndex-1)*3 + (1:3), :);
+                estimatedPositionsCI = self.simLoggedData(uavIndex).estimatedStateCI((agentIndex-1)*3 + (1:3), :);
+                estimatedPositionsEVCI = self.simLoggedData(uavIndex).estimatedStateEVCI((agentIndex-1)*3 + (1:3), :);
 
                 % Plot true positions
                 plot3(plotTruePositions(1, :), plotTruePositions(2, :), plotTruePositions(3, :), ...
