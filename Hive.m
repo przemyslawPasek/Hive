@@ -15,7 +15,7 @@ addpath(pwd,"Scenarios/");  % Adding current directory to MATLAB's search path f
 
 % Loading Scenario:
 % -----------------
-scenarioData = loadScenario("Scenario6UAV.mat");  % Loading scenario data from *.mat file
+scenarioData = loadScenario("Scenario4UAV_3D.mat");  % Loading scenario data from *.mat file
 
 % Initialize Swarm
 Swarm = Swarm(scenarioData);  % Creating a Swarm object with the loaded scenario data
@@ -32,7 +32,7 @@ while advance(Swarm.swarmSimulationScene)  % Loop continues as long as the simul
     % ---------------------
     % Checks if the conditions are met to apply noise to gpsSensor model or
     % to restore accurate measurements.
-    Swarm.gpsCheckNoise([3 6]);
+    % Swarm.gpsCheckNoise([1 3]);
 
     % Sensor Updates:
     % ---------------

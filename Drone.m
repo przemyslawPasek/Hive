@@ -220,13 +220,16 @@ classdef Drone < handle
 
         %% Function which modify gpsSensor model in order to apply noise
         function gpsAddNoise(self)
-            self.uavPlatform.Sensors(1).SensorModel.DecayFactor = 0;
+            % self.uavPlatform.Sensors(1).SensorModel.DecayFactor = 0;
+            self.uavPlatform.Sensors(1).SensorModel.HorizontalPositionAccuracy = 20;
         end
 
         %% Function which modify gpsSensor model in delete noise and 
         %  restore original settings
         function gpsDeleteNoise(self)
-            self.uavPlatform.Sensors(1).SensorModel.DecayFactor = 0.999;
+            % self.uavPlatform.Sensors(1).SensorModel.DecayFactor = 0.999;
+            self.uavPlatform.Sensors(1).SensorModel.HorizontalPositionAccuracy = 1.6;
+
         end
 
         %% Function to convert GPS spherical coordinates from to ECEF 
@@ -357,6 +360,7 @@ classdef Drone < handle
         function updateNavData(self)
             [self.uavMotionVector,self.uavLLAVector] = read(self.uavPlatform);
             self.uavTruePosition = self.uavMotionVector(1,1:3);
+            self.uavTruePosition(3) = - self.uavTruePosition(3);
             self.uavTrueVelocity = self.uavMotionVector(1,4:6);
             self.uavTrueOrientation = self.uavMotionVector(1,10:13);
 
@@ -386,7 +390,7 @@ classdef Drone < handle
             end
 
             F = eye(length(stateVector));
-            Q = 1000 * eye(length(stateVector));
+            Q = 10 * eye(length(stateVector));
 
             %%%%%%%%%% Prediction %%%%%%%%%%%%
             uavPredictedStateVector = F * stateVector;
@@ -664,7 +668,6 @@ classdef Drone < handle
             % Perform PCA on the covariance matrix
             [pcaCoefficients,pcaEigenvalues] = pcacov(covarianceMatrix);
             
-            pcaEigenvalues
             % Determine the number of components to retain
             numSignificant = sum(pcaEigenvalues > reductionThreshold);
 

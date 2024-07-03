@@ -117,9 +117,9 @@ classdef Swarm < handle
 
             self.swarmParameters.nbAgents = self.swarmNbAgents;
             self.swarmParameters.maxRange = 100;
-            self.swarmParameters.evciReductionThreshold = 100;
+            self.swarmParameters.evciReductionThreshold = 10;
             self.swarmParameters.noisePresence = 0;
-            self.swarmParameters.timeOfNoisePresence = [5 15];
+            self.swarmParameters.timeOfNoisePresence = [5 10];
 
 
             % Initialize logged data structure
@@ -276,7 +276,7 @@ classdef Swarm < handle
                 self.swarmTrueLLAPositions((uavIndex-1)*3 + 3) = newLLAPosition(3);
 
                 % Update the true scenario positions [x y z]
-                newPosition = self.UAVs(uavIndex).uavTruePosition;
+                newPosition = self.UAVs(uavIndex).uavTruePosition
                 self.swarmTruePositions((uavIndex-1)*3 + 1) = newPosition(1);
                 self.swarmTruePositions((uavIndex-1)*3 + 2) = newPosition(2);
                 self.swarmTruePositions((uavIndex-1)*3 + 3) = newPosition(3);
