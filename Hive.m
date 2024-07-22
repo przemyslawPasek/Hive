@@ -32,7 +32,7 @@ while advance(Swarm.swarmSimulationScene)  % Loop continues as long as the simul
     % ---------------------
     % Checks if the conditions are met to apply noise to gpsSensor model or
     % to restore accurate measurements.
-    % Swarm.gpsCheckNoise([1 3]);
+    Swarm.gpsCheckNoise([1 3]);
 
     % Sensor Updates:
     % ---------------
@@ -50,7 +50,7 @@ while advance(Swarm.swarmSimulationScene)  % Loop continues as long as the simul
     % ---------------------
     % Updates the Swarm's true position vector [Latitude, Longitude, Altitude] for each UAV and inspects their vicinity to identify neighbors.
     % This helps in maintaining accurate true state information and identifying UAVs in close proximity for data fusion.
-    Swarm.updateTruePositions();
+    Swarm.updateTrueStates();
 
     % State Estimation using EKF:
     % ---------------------------
