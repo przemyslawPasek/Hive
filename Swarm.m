@@ -115,17 +115,10 @@ classdef Swarm < handle
             self.swarmParameters = repmat(struct('nbAgents', [], ...
                 'estimationModel', [], ...
                 'maxCommunicationRange', [], ...
-                'evciReductionThreshold', [],...
+                'evciPosReductionThreshold', [],...
+                'evciVelReductionThreshold', [],...
                 'noisePresence', [],...
                 'timeOfNoisePresence', []),1);
-
-            self.swarmParameters.nbAgents = self.swarmNbAgents;
-            self.swarmParameters.estimationModel = 'PV';
-            self.swarmParameters.maxRange = 100;
-            self.swarmParameters.evciReductionThreshold = 10;
-            self.swarmParameters.noisePresence = 0;
-            self.swarmParameters.timeOfNoisePresence = [5 10];
-
 
             % Initialize logged data structure
             self.simLoggedData = repmat(struct('trueState', [], ...
@@ -150,6 +143,14 @@ classdef Swarm < handle
                 'nisCI', [], ...
                 'nisEVCI', [], ...
                 'reducedVectors',[]), 1, self.swarmNbAgents);
+
+            self.swarmParameters.nbAgents = self.swarmNbAgents;
+            self.swarmParameters.estimationModel = 'PV';
+            self.swarmParameters.maxRange = 100;
+            self.swarmParameters.evciPosReductionThreshold = 1000;
+            self.swarmParameters.evciVelReductionThreshold = 10;
+            self.swarmParameters.noisePresence = 0;
+            self.swarmParameters.timeOfNoisePresence = [5 10];
 
             % Initialize UAVs and their positions
             for uavIndex = 1:self.swarmNbAgents
@@ -478,8 +479,8 @@ classdef Swarm < handle
             xlabel('Time Step');
             ylabel('RMSE');
             title("RMSE Over Time ","FontSize",14);
-            subtitle("Threshold: " + self.swarmParameters.evciReductionThreshold,...
-                "FontWeight","normal" );
+            % subtitle("Threshold: " + self.swarmParameters.evciReductionThreshold,...
+            %     "FontWeight","normal" );
             legend('show');
             grid on;
         end

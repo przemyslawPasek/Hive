@@ -49,6 +49,12 @@
 %       - uavCovarianceMatrixCI: Fused covariance matrix after CI
 %       - uavStateVectorEVCI: Fused state vector after Eigenvalue-based Covariance Intersection (EVCI)
 %       - uavCovarianceMatrixEVCI: Fused covariance matrix after EVCI
+%
+%   - Auxiliary Variables:
+%       - uavEigenvaluesPositionsToTransmitEVCI: Vector of significant eigenvalues related to positions
+%       - uavEigenvaluesVelocitiesToTransmitEVCI: Vector of significant eigenvalues related to velocities
+%       - uavMatrixPositionsToTransmitEVCI: Coefficients matrix related to positions to be transmitted
+%       - uavMatrixVelocitiesToTransmitEVCI: Voefficients matrix related to positions to be transmitted
 %       - uavEstimationModel: Variable telling which estimation model is utilized P or PV
 %       - uavVelocityOffset: Variable specifying the number of coordinates in the state vector before the velocity components
 %
@@ -82,6 +88,7 @@
 %   - fuseWithNeighborsCI: Fuses the UAV's state with its neighbors using Covariance Intersection (CI)
 %   - fuseWithNeighborsEVCI: Fuses data with neighbors using PCA-based Covariance Intersection (EVCI)
 %   - covarianceIntersection: Applies Covariance Intersection to fuse multiple state estimates
+%   - prepareDataToBeSentEVCI: Function which conducts PCA compression and prepares data to be sent to another nodes
 %   - collectNeighborsData: Collects state and covariance data from the UAV's neighbors
 %   - pcaCompression: Performs PCA-based data compression on the covariance matrix
 %   - reconstructCovarianceMatrix: Reconstructs the covariance matrix from received PCA-compressed data
@@ -149,9 +156,13 @@ classdef Drone < handle
         uavCovarianceMatrixEVCI % Fused covariance matrix after EVCI
 
         % Auxiliary variables
+        uavEigenvaluesPositionsToTransmitEVCI   % Vector of significant eigenvalues related to positions
+        uavEigenvaluesVelocitiesToTransmitEVCI  %Vector of significant eigenvalues related to velocities
+        uavMatrixPositionsToTransmitEVCI    %Coefficients matrix related to positions to be transmitted
+        uavMatrixVelocitiesToTransmitEVCI   % Coefficients matrix related to positions to be transmitted
         uavEstimationModel      % Variable telling which estimation model is utilized P or PV
         uavVelocityOffset       % Variable specifying the number of coordinates in the
-        % state vector before the velocity components
+                                % state vector before the velocity components
 
         % Logging Variables
         evciReductionMetrics % Cell array storing the number of significant components during EVCI
@@ -478,6 +489,7 @@ classdef Drone < handle
             elseif strcmp(fusionAlgorithm,'EVCI')
                 self.uavStateVectorEVCI = uavUpdatedStateVector;
                 self.uavCovarianceMatrixEVCI = uavUpdatedCovarianceMatrix;
+                self.prepareDataToBeSentEVCI();
             end
         end
 
@@ -562,6 +574,38 @@ classdef Drone < handle
             end
         end
 
+        %% Function which conducts PCA compression and prepares data to be sent to another nodes
+        %  Output: uavMatrixPositionsToTransmitEVCI, uavEigenvaluesPositionsToTransmitEVCI
+        %          uavMatrixVelocitiesToTransmitEVCI, uavEigenvaluesVelocitiesToTransmitEVCI
+        function prepareDataToBeSentEVCI(self)
+            switch self.uavEstimationModel
+                case 'P'
+                    % Compress data
+                    [self.uavMatrixPositionsToTransmitEVCI, self.uavEigenvaluesPositionsToTransmitEVCI] = ...
+                        self.pcaCompression(self.uavCovarianceMatrixEVCI,self.swarm.swarmParameters.evciPosReductionThreshold);
+
+                    % Log the data reduction metrics for this step
+                    self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPositionsToTransmitEVCI);
+                case 'PV'
+                    % Compress data
+                    covarianceMatrixPositions = ...
+                        self.uavCovarianceMatrixEVCI(1:self.uavVelocityOffset,1:self.uavVelocityOffset);
+
+                    covarianceMatrixVelocities = ...
+                        self.uavCovarianceMatrixEVCI(self.uavVelocityOffset+1:end,self.uavVelocityOffset+1:end);
+
+                    [self.uavMatrixPositionsToTransmitEVCI, self.uavEigenvaluesPositionsToTransmitEVCI] = ...
+                        self.pcaCompression(covarianceMatrixPositions,self.swarm.swarmParameters.evciPosReductionThreshold);
+
+                    [self.uavMatrixVelocitiesToTransmitEVCI, self.uavEigenvaluesVelocitiesToTransmitEVCI] = ...
+                        self.pcaCompression(covarianceMatrixVelocities,self.swarm.swarmParameters.evciVelReductionThreshold);
+
+                    % Log the data reduction metrics for this step
+                    self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPositionsToTransmitEVCI) +...
+                        length(self.uavEigenvaluesVelocitiesToTransmitEVCI);
+            end
+        end
+
         %% Funtion which conducts data fusion using classic Covariance Intersection algorithm
         %  Dependency: collectNeighborsData() - gather state and covariance from neighbors
         %  covaraianceIntersection() - conduct CI with ulaltered dataset
@@ -614,8 +658,6 @@ classdef Drone < handle
                 neighborsData.covarianceMatrices{self.uavIndex} = self.uavCovarianceMatrixEVCI;
                 neighborsData.weights{self.uavIndex} = swarmWeights(self.uavIndex);
 
-                retainedComponentsLog = []; % Initialize logging for significant components
-
                 for neighborIndex = neighborIndices
                     % Get the neighbor UAV's data (simulated as received data)
                     neighborDrone = self.swarm.UAVs(neighborIndex); % Access the neighbor UAV
@@ -623,15 +665,8 @@ classdef Drone < handle
 
                     switch self.uavEstimationModel
                         case 'P'
-                            % Step 1: Compress the neighbor's data
-                            [transmittedMatrix, transmittedEigenvalues] = ...
-                                neighborDrone.pcaCompression(neighborDrone.uavCovarianceMatrixEVCI);
-                            
-                            % Step 2: Simulate transmission and reception
-                            receivedMatrixPositions = transmittedMatrix;
-
-                            % Log the number of significant components retained
-                            retainedComponentsLog = [retainedComponentsLog, length(transmittedEigenvalues)];
+                            % Simulate transmission and reception
+                            receivedMatrixPositions = self.uavMatrixPositionsToTransmitEVCI;
 
                             % Reconstruct or directly use received data
                             numDiscardedComponents = length(self.uavStateVector)-length(transmittedEigenvalues);
@@ -642,29 +677,13 @@ classdef Drone < handle
                                 neighborsData.weights{neighborIndex} = swarmWeights(neighborIndex);
                             end
                         case 'PV'
-                            covarianceMatrixPositions = ...
-                                neighborDrone.uavCovarianceMatrixEVCI(1:self.uavVelocityOffset,1:self.uavVelocityOffset);
-                            
-                            covarianceMatrixVelocities = ...
-                                neighborDrone.uavCovarianceMatrixEVCI(self.uavVelocityOffset+1:end,self.uavVelocityOffset+1:end);
-
-                            [transmittedMatrixPositions, transmittedEigenvaluesPositions] = ...
-                                neighborDrone.pcaCompression(covarianceMatrixPositions);
-
-                            [transmittedMatrixVelocities, transmittedEigenvaluesVelocities] = ...
-                                neighborDrone.pcaCompression(covarianceMatrixVelocities);
-                            
-                            % Step 2: Simulate transmission and reception
-                            receivedMatrixPositions = transmittedMatrixPositions;
-                            receivedMatrixVelocities = transmittedMatrixVelocities;
-
-                            % Log the number of significant components retained
-                            retainedComponentsLog = [retainedComponentsLog, ...
-                                length(transmittedEigenvaluesPositions)+length(transmittedEigenvaluesVelocities)];
+                            % Simulate transmission and reception
+                            receivedMatrixPositions = neighborDrone.uavMatrixPositionsToTransmitEVCI;
+                            receivedMatrixVelocities = neighborDrone.uavMatrixVelocitiesToTransmitEVCI;
 
                             % Reconstruct or directly use received data
-                            numDiscardedComponentsPositions = self.uavVelocityOffset-length(transmittedEigenvaluesPositions);
-                            numDiscardedComponentsVelocities = self.uavVelocityOffset-length(transmittedEigenvaluesVelocities);
+                            numDiscardedComponentsPositions = self.uavVelocityOffset-length(neighborDrone.uavEigenvaluesPositionsToTransmitEVCI);
+                            numDiscardedComponentsVelocities = self.uavVelocityOffset-length(neighborDrone.uavEigenvaluesVelocitiesToTransmitEVCI);
 
                             PapproxNeighborPositions = self.reconstructCovarianceMatrix(receivedMatrixPositions, numDiscardedComponentsPositions);
                             PapproxNeighborVelocities = self.reconstructCovarianceMatrix(receivedMatrixVelocities, numDiscardedComponentsVelocities);
@@ -676,9 +695,6 @@ classdef Drone < handle
                                 neighborsData.weights{neighborIndex} = swarmWeights(neighborIndex);
                             end
                     end
-
-                    % Log the data reduction metrics for this step
-                    self.evciReductionMetrics{end+1} = retainedComponentsLog;
                 end
                 % Perform Covariance Intersection or other fusion with valid data
                 if dataToBeFused == true
@@ -744,7 +760,7 @@ classdef Drone < handle
         %  Input:   reductionThreshold
         %  Output:  transmittedMatrix - matrix with eigenvector coeefs intended for transmission
         %           significantEigenvalues - eigenvalues intended for transmission
-        function [transmittedMatrix, significantEigenvalues] = pcaCompression(self, covarianceMatrixToDecompose)
+        function [transmittedMatrix, significantEigenvalues] = pcaCompression(~, covarianceMatrixToDecompose, reductionThreshold)
 
             % Print the eigenvalues for debugging
             eigenvalues = eig(covarianceMatrixToDecompose);
@@ -758,7 +774,7 @@ classdef Drone < handle
             [pcaCoefficients,pcaEigenvalues] = pcacov(covarianceMatrix);
 
             % Determine the number of components to reject
-            numRejected = sum(pcaEigenvalues > self.swarmParameters.evciReductionThreshold);
+            numRejected = sum(pcaEigenvalues > reductionThreshold);
 
             % Transmit only reduced components
             % Select the significant components
