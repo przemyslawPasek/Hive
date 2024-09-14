@@ -51,10 +51,10 @@
 %       - uavCovarianceMatrixEVCI: Fused covariance matrix after EVCI
 %
 %   - Auxiliary Variables:
-%       - uavEigenvaluesPositionsToTransmitEVCI: Vector of significant eigenvalues related to positions
-%       - uavEigenvaluesVelocitiesToTransmitEVCI: Vector of significant eigenvalues related to velocities
-%       - uavMatrixPositionsToTransmitEVCI: Coefficients matrix related to positions to be transmitted
-%       - uavMatrixVelocitiesToTransmitEVCI: Voefficients matrix related to positions to be transmitted
+%       - uavEigenvaluesPosToTransEVCI: Vector of significant eigenvalues related to positions
+%       - uavEigenvaluesVelToTransEVCI: Vector of significant eigenvalues related to velocities
+%       - uavCovarianceMatrixPosToTransEVCI: Coefficients matrix related to positions to be transmitted
+%       - uavCovarianceMatrixVelToTransEVCI: Voefficients matrix related to positions to be transmitted
 %       - uavEstimationModel: Variable telling which estimation model is utilized P or PV
 %       - uavVelocityOffset: Variable specifying the number of coordinates in the state vector before the velocity components
 %
@@ -95,6 +95,9 @@
 %
 % Mesh Update:
 %   - updateMesh: Sets up and updates the platform mesh with position and orientation
+%
+% Data Visualization Functions:       
+%   - plotEllipsoids: Uncertainty ellipsoids plotting
 %
 % Note:
 % -----
@@ -156,13 +159,13 @@ classdef Drone < handle
         uavCovarianceMatrixEVCI % Fused covariance matrix after EVCI
 
         % Auxiliary variables
-        uavEigenvaluesPositionsToTransmitEVCI   % Vector of significant eigenvalues related to positions
-        uavEigenvaluesVelocitiesToTransmitEVCI  %Vector of significant eigenvalues related to velocities
-        uavMatrixPositionsToTransmitEVCI    %Coefficients matrix related to positions to be transmitted
-        uavMatrixVelocitiesToTransmitEVCI   % Coefficients matrix related to positions to be transmitted
+        uavEigenvaluesPosToTransEVCI   % Vector of significant eigenvalues related to positions
+        uavEigenvaluesVelToTransEVCI  %Vector of significant eigenvalues related to velocities
+        uavCovarianceMatrixPosToTransEVCI    %Coefficients matrix related to positions to be transmitted
+        uavCovarianceMatrixVelToTransEVCI   % Coefficients matrix related to positions to be transmitted
         uavEstimationModel      % Variable telling which estimation model is utilized P or PV
         uavVelocityOffset       % Variable specifying the number of coordinates in the
-                                % state vector before the velocity components
+        % state vector before the velocity components
 
         % Logging Variables
         evciReductionMetrics % Cell array storing the number of significant components during EVCI
@@ -207,16 +210,16 @@ classdef Drone < handle
 
             % Initialize state vector and covariance matrix for estimation
             if strcmp(self.uavEstimationModel,'P')
-                
+
                 self.uavStateVector = zeros(self.swarmParameters.nbAgents * 3, 1);
                 self.uavCovarianceMatrix = eye(self.swarmParameters.nbAgents * 3) * 1000;
                 self.uavVelocityOffset = 0;
-                
+
                 % Set initial position in state vector
                 self.uavStateVector(self.uavSI:self.uavSI+2) = self.uavTruePosition';
 
             elseif strcmp(self.uavEstimationModel,'PV')
-                
+
                 self.uavStateVector = zeros(self.swarmParameters.nbAgents * 6, 1);
                 self.uavCovarianceMatrix = eye(self.swarmParameters.nbAgents * 6) * 1000;
                 self.uavVelocityOffset = self.swarmParameters.nbAgents * 3;
@@ -575,34 +578,40 @@ classdef Drone < handle
         end
 
         %% Function which conducts PCA compression and prepares data to be sent to another nodes
-        %  Output: uavMatrixPositionsToTransmitEVCI, uavEigenvaluesPositionsToTransmitEVCI
-        %          uavMatrixVelocitiesToTransmitEVCI, uavEigenvaluesVelocitiesToTransmitEVCI
+        %  Output: uavCovarianceMatrixPosToTransEVCI, uavEigenvaluesPosToTransEVCI
+        %          uavCovarianceMatrixVelToTransEVCI, uavEigenvaluesVelToTransEVCI
         function prepareDataToBeSentEVCI(self)
             switch self.uavEstimationModel
                 case 'P'
                     % Compress data
-                    [self.uavMatrixPositionsToTransmitEVCI, self.uavEigenvaluesPositionsToTransmitEVCI] = ...
+                    [self.uavCovarianceMatrixPosToTransEVCI, self.uavEigenvaluesPosToTransEVCI] = ...
                         self.pcaCompression(self.uavCovarianceMatrixEVCI,self.swarm.swarmParameters.evciPosReductionThreshold);
 
                     % Log the data reduction metrics for this step
-                    self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPositionsToTransmitEVCI);
+                    self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPosToTransEVCI);
                 case 'PV'
                     % Compress data
+                    stateVectorPositions = self.uavStateVectorEVCI(1:self.uavVelocityOffset);
+
                     covarianceMatrixPositions = ...
                         self.uavCovarianceMatrixEVCI(1:self.uavVelocityOffset,1:self.uavVelocityOffset);
+
+                    stateVectorVelocities = self.uavStateVectorEVCI(self.uavVelocityOffset+1:end);
 
                     covarianceMatrixVelocities = ...
                         self.uavCovarianceMatrixEVCI(self.uavVelocityOffset+1:end,self.uavVelocityOffset+1:end);
 
-                    [self.uavMatrixPositionsToTransmitEVCI, self.uavEigenvaluesPositionsToTransmitEVCI] = ...
-                        self.pcaCompression(covarianceMatrixPositions,self.swarm.swarmParameters.evciPosReductionThreshold);
+                    [self.uavCovarianceMatrixPosToTransEVCI, self.uavEigenvaluesPosToTransEVCI] = ...
+                        self.pcaCompression(stateVectorPositions,covarianceMatrixPositions,...
+                        self.swarm.swarmParameters.evciPosReductionThreshold,"Positions");
 
-                    [self.uavMatrixVelocitiesToTransmitEVCI, self.uavEigenvaluesVelocitiesToTransmitEVCI] = ...
-                        self.pcaCompression(covarianceMatrixVelocities,self.swarm.swarmParameters.evciVelReductionThreshold);
+                    [self.uavCovarianceMatrixVelToTransEVCI, self.uavEigenvaluesVelToTransEVCI] = ...
+                        self.pcaCompression(stateVectorVelocities,covarianceMatrixVelocities,...
+                        self.swarm.swarmParameters.evciVelReductionThreshold,"Velocitites");
 
                     % Log the data reduction metrics for this step
-                    self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPositionsToTransmitEVCI) +...
-                        length(self.uavEigenvaluesVelocitiesToTransmitEVCI);
+                    self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPosToTransEVCI) +...
+                        length(self.uavEigenvaluesVelToTransEVCI);
             end
         end
 
@@ -666,7 +675,7 @@ classdef Drone < handle
                     switch self.uavEstimationModel
                         case 'P'
                             % Simulate transmission and reception
-                            receivedMatrixPositions = self.uavMatrixPositionsToTransmitEVCI;
+                            receivedMatrixPositions = self.uavCovarianceMatrixPosToTransEVCI;
 
                             % Reconstruct or directly use received data
                             numDiscardedComponents = length(self.uavStateVector)-length(transmittedEigenvalues);
@@ -678,12 +687,12 @@ classdef Drone < handle
                             end
                         case 'PV'
                             % Simulate transmission and reception
-                            receivedMatrixPositions = neighborDrone.uavMatrixPositionsToTransmitEVCI;
-                            receivedMatrixVelocities = neighborDrone.uavMatrixVelocitiesToTransmitEVCI;
+                            receivedMatrixPositions = neighborDrone.uavCovarianceMatrixPosToTransEVCI;
+                            receivedMatrixVelocities = neighborDrone.uavCovarianceMatrixVelToTransEVCI;
 
                             % Reconstruct or directly use received data
-                            numDiscardedComponentsPositions = self.uavVelocityOffset-length(neighborDrone.uavEigenvaluesPositionsToTransmitEVCI);
-                            numDiscardedComponentsVelocities = self.uavVelocityOffset-length(neighborDrone.uavEigenvaluesVelocitiesToTransmitEVCI);
+                            numDiscardedComponentsPositions = self.uavVelocityOffset-length(neighborDrone.uavEigenvaluesPosToTransEVCI);
+                            numDiscardedComponentsVelocities = self.uavVelocityOffset-length(neighborDrone.uavEigenvaluesVelToTransEVCI);
 
                             PapproxNeighborPositions = self.reconstructCovarianceMatrix(receivedMatrixPositions, numDiscardedComponentsPositions);
                             PapproxNeighborVelocities = self.reconstructCovarianceMatrix(receivedMatrixVelocities, numDiscardedComponentsVelocities);
@@ -760,23 +769,29 @@ classdef Drone < handle
         %  Input:   reductionThreshold
         %  Output:  transmittedMatrix - matrix with eigenvector coeefs intended for transmission
         %           significantEigenvalues - eigenvalues intended for transmission
-        function [transmittedMatrix, significantEigenvalues] = pcaCompression(~, covarianceMatrixToDecompose, reductionThreshold)
-
-            % Print the eigenvalues for debugging
-            eigenvalues = eig(covarianceMatrixToDecompose);
-            disp('Eigenvalues before PCA:');
-            disp(eigenvalues);
+        function [transmittedMatrix, significantEigenvalues] = pcaCompression(self,stateVectorHalf,covarianceMatrixToDecompose, ...
+                reductionThreshold,stateVectorPart)
 
             % Ensure that covariance matrix is semi
             covarianceMatrix = nearestSPD(covarianceMatrixToDecompose);
 
+            % Print the eigenvalues for debugging
+            [eigenvectors,eigenvalues] = eig(covarianceMatrix,'vector');
+            disp('Eigenvalues before PCA:');
+            disp(eigenvalues);
+
             % Perform PCA on the covariance matrix
-            [pcaCoefficients,pcaEigenvalues] = pcacov(covarianceMatrix);
+            [pcaCoefficients,pcaEigenvalues,pcaExplained] = pcacov(covarianceMatrix);
+
+            if strcmp(stateVectorPart,"Positions")
+                % Plot uncertainty ellipsoids
+                plotEllipsoids(self,stateVectorHalf,eigenvectors,eigenvalues)
+            end
 
             % Determine the number of components to reject
-            numRejected = sum(pcaEigenvalues > reductionThreshold);
+            numRejected = size(pcaExplained)/2;
+            % numRejected = sum(pcaEigenvalues > reductionThreshold);
 
-            % Transmit only reduced components
             % Select the significant components
             significantComponents = pcaCoefficients(:,(1+numRejected):size(pcaCoefficients,2));
             significantEigenvalues = pcaEigenvalues((1+numRejected):length(pcaEigenvalues));
@@ -806,7 +821,57 @@ classdef Drone < handle
             % Reconstruct the approximate covariance matrix
             reconstructedCovarianceMatrix = C + A;
         end
+
+        %% Uncertainty ellipsoids plotting
+        %  Input:   stateVector, eigenvectors, eigenvalues
+        function plotEllipsoids(~,stateVector, eigenvectors, eigenvalues)
+            % Number of UAVs
+            num_uavs = length(stateVector) / 3;
+
+            % Confidence interval (adjust as needed)
+            confInterval = 2.796; % 95% confidence interval
+
+            % Generate points on a unit sphere
+            [x, y, z] = sphere(20);
+            spherePoints = [x(:)'; y(:)'; z(:)'];
+
+            % Plot each UAV's position and uncertainty ellipsoid
+            for i = 1:num_uavs
+                % Extract UAV position
+                uavPos = stateVector((i-1)*3+1 : i*3);
+
+                % Extract corresponding eigenvectors and eigenvalues
+                eiVec = eigenvectors((i-1)*3+1 : i*3, (i-1)*3+1 : i*3);
+                eiVal = eigenvalues((i-1)*3+1 : i*3);
+
+                % Calculate ellipsoid radii
+                radii = sqrt(eiVal) * confInterval;
+
+                % Generate ellipsoid points
+                ellipsoid_points = uavPos + eiVec * diag(radii) * spherePoints;
+
+                % Reshape for plotting
+                ellipsoid_x = reshape(ellipsoid_points(1,:), size(x));
+                ellipsoid_y = reshape(ellipsoid_points(2,:), size(y));
+                ellipsoid_z = reshape(ellipsoid_points(3,:), size(z));
+
+                % Plot ellipsoid
+                surf(ellipsoid_x, ellipsoid_y, ellipsoid_z, 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+                hold on;
+
+                % Plot UAV position
+                plot3(uavPos(1), uavPos(2), uavPos(3), 'r.', 'MarkerSize', 20);
+            end
+
+            axis equal;
+            grid on;
+            xlabel('X');
+            ylabel('Y');
+            zlabel('Z');
+            title('UAV Swarm with Uncertainty Ellipsoids');
+        end
     end
 end
+
 
 
