@@ -53,6 +53,7 @@
 %   - fuseWithNeighborsEVCI: Fuses the UAV's state with its neighbors using PCA-based Covariance Intersection.
 %
 % Data Logging and Metric Calculation:
+%   - analyzeSwarmDensity: Function which provides metrics related to UAV swarm regarding its density
 %   - logUAVData: Logs true and estimated states for each UAV at each time step.
 %   - calculateMetrics: Calculates metrics (RMSE, ATE, RPE, NIS) comparing different estimation methods.
 %
@@ -86,6 +87,7 @@ classdef Swarm < handle
         swarmTrueVelocities      % Vector containing true scenario velocities of each UAV
         swarmInnerConnections   % Cell array to hold neighbors' indices for each UAV
         swarmMetropolisWeights  % Cell array of Metropolis weights for each UAV
+        swarmDensityProperties  % Structure with swarm metrics related to its density
 
         simLoggedData           % Struct containing logged estimation data
         simProcessedData        % Struct containing processed data with calculated metrics
@@ -110,7 +112,7 @@ classdef Swarm < handle
             self.swarmTrueVelocities = [];
             self.swarmInnerConnections = cell(1, self.swarmNbAgents);
             self.swarmMetropolisWeights = cell(1, self.swarmNbAgents);
-            
+
             % Initialize swarm parameters structure
             self.swarmParameters = repmat(struct('nbAgents', [], ...
                 'estimationModel', [], ...
@@ -146,7 +148,7 @@ classdef Swarm < handle
 
             self.swarmParameters.nbAgents = self.swarmNbAgents;
             self.swarmParameters.estimationModel = 'PV';
-            self.swarmParameters.maxRange = 100;
+            self.swarmParameters.maxRange = 10;
             self.swarmParameters.evciPosReductionThreshold = 1000;
             self.swarmParameters.evciVelReductionThreshold = 10;
             self.swarmParameters.noisePresence = 0;
@@ -167,6 +169,8 @@ classdef Swarm < handle
 
             % Determine initial neighbors' connections
             self.determineInnerConnections();
+
+            self.analyzeSwarmDensity();
 
             % Update simulation time
             self.simTimeStep = self.swarmSimulationScene.CurrentTime;
@@ -189,8 +193,8 @@ classdef Swarm < handle
             end
         end
 
-        %% Function which checks wheter the condtions conditions are met 
-        %  to apply noise or restore original state of the gpsSensor 
+        %% Function which checks wheter the condtions conditions are met
+        %  to apply noise or restore original state of the gpsSensor
         %  (the conditions are time of noise)
         %  Input: uavIndices - indices of UAVs with degraded GPS
         function gpsCheckNoise(self,uavIndices)
@@ -367,7 +371,9 @@ classdef Swarm < handle
         %% Data fusion with UAVs around - collects data from nieghbors and fuse using CI
         function fuseWithNeighborsCI(self)
             for uavIndex = 1:self.swarmNbAgents
-                [fusedState, fusedCovariance] = self.UAVs(uavIndex).fuseWithNeighborsCI();
+                if ~isempty(self.swarmInnerConnections{uavIndex})
+                    [fusedState, fusedCovariance] = self.UAVs(uavIndex).fuseWithNeighborsCI();
+                end
             end
             for uavIndex = 1:self.swarmNbAgents
                 if ~isempty(self.swarmInnerConnections{uavIndex})
@@ -381,7 +387,9 @@ classdef Swarm < handle
         %  eigenvalue decomposition and data reduction, then fuse using CI
         function fuseWithNeighborsEVCI(self)
             for uavIndex = 1:self.swarmNbAgents
-                [fusedState, fusedCovariance] = self.UAVs(uavIndex).fuseWithNeighborsEVCI();
+                if ~isempty(self.swarmInnerConnections{uavIndex})
+                    [fusedState, fusedCovariance] = self.UAVs(uavIndex).fuseWithNeighborsEVCI();
+                end
             end
             for uavIndex = 1:self.swarmNbAgents
                 if ~isempty(self.swarmInnerConnections{uavIndex})
@@ -389,6 +397,99 @@ classdef Swarm < handle
                     self.UAVs(uavIndex).uavCovarianceMatrixEVCI = fusedCovariance;
                 end
             end
+        end
+
+        %% Function which provides metrics related to UAV swarm regarding its density
+        % Output: swarmDensityProperties - structure with swarm metrics
+        function analyzeSwarmDensity(self)
+                        
+            % Calculate pairwise distances
+           positions = reshape(self.swarmTruePositions, [3, self.swarmNbAgents])';
+           distMatrix = pdist2(positions,positions);
+
+           % Create adjacency matrix
+           adjMatrix = distMatrix <= self.swarmParameters.maxRange;
+           adjMatrix = adjMatrix - diag(diag(adjMatrix));  % Remove self-connections
+
+           % Average distance between all nodes
+           avgDistance = mean(distMatrix(triu(true(self.swarmNbAgents), 1)));
+
+            % Create graph
+            G = graph();
+            for i = 1:self.swarmNbAgents
+                for j = i+1:self.swarmNbAgents
+                    if distMatrix(i, j) <= self.swarmParameters.maxRange
+                        G = addedge(G, i, j, distMatrix(i, j));
+                    end
+                end
+            end
+
+            % Graph density
+            maxEdges = self.swarmNbAgents * (self.swarmNbAgents - 1) / 2;
+            graphDensity = sum(sum(adjMatrix)) / (2 * maxEdges);
+
+            % Average degree
+            avgDegree = mean(sum(adjMatrix));
+
+            % Clustering coefficient
+            clusteringCoeff = zeros(self.swarmNbAgents, 1);
+            for i = 1:self.swarmNbAgents
+                neighbors = find(adjMatrix(i, :));
+                if length(neighbors) < 2
+                    clusteringCoeff(i) = 0;
+                else
+                    subGraph = adjMatrix(neighbors, neighbors);
+                    clusteringCoeff(i) = sum(sum(subGraph)) / (length(neighbors) * (length(neighbors) - 1));
+                end
+            end
+            avgClusteringCoeff = mean(clusteringCoeff);
+
+            % Minimum Spanning Tree
+            G = graph(adjMatrix);
+            mst = minspantree(G);
+            mstWeight = sum(mst.Edges.Weight);
+
+            % Average nearest neighbor distance
+            nearestNeighborDistance = zeros(1, self.swarmNbAgents);
+            for i = 1:self.swarmNbAgents
+                neighborDistances = distMatrix(i, :);
+                neighborDistances(i) = Inf;  % Ignore the diagonal element
+                nearestNeighborDistance(i) = min(neighborDistances);
+            end
+            avgNearestNeighborDistance = mean(nearestNeighborDistance);
+
+            % Return the results as a structure
+            self.swarmDensityProperties.avgDistance = avgDistance;
+            self.swarmDensityProperties.graphDensity = graphDensity;
+            self.swarmDensityProperties.avgDegree = avgDegree;
+            self.swarmDensityProperties.avgNearestNeighborDistance = avgNearestNeighborDistance;
+            self.swarmDensityProperties.avgClusteringCoeff = avgClusteringCoeff;
+            self.swarmDensityProperties.mstWeight = mstWeight;
+
+            % Visualization
+            figure;
+
+            % 3D scatter plot of UAV positions
+            subplot(2,2,1);
+            scatter3(positions(:,1), positions(:,2), positions(:,3), 50, 'filled');
+            title('UAV Swarm Positions');
+            xlabel('X'); ylabel('Y'); zlabel('Z');
+            grid on;
+
+            % Graph visualization
+            subplot(2,2,2);
+            plot(G, 'XData', positions(:,1), 'YData', positions(:,2), 'ZData', positions(:,3));
+            title('UAV Swarm Connections');
+            xlabel('X'); ylabel('Y'); zlabel('Z');
+            grid on;
+
+            % Minimum Spanning Tree
+            subplot(2,2,3);
+            plot(mst, 'XData', positions(:,1), 'YData', positions(:,2), 'ZData', positions(:,3));
+            title('Minimum Spanning Tree');
+            xlabel('X'); ylabel('Y'); zlabel('Z');
+            grid on;
+
         end
 
         %% Method to log data for each UAV at each time step

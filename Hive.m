@@ -32,7 +32,7 @@ while advance(Swarm.swarmSimulationScene)  % Loop continues as long as the simul
     % ---------------------
     % Checks if the conditions are met to apply noise to gpsSensor model or
     % to restore accurate measurements.
-    % Swarm.gpsCheckNoise([1 3]);
+    Swarm.gpsCheckNoise([1 3]);
 
     % Sensor Updates:
     % ---------------

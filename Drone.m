@@ -55,6 +55,8 @@
 %       - uavEigenvaluesVelToTransEVCI: Vector of significant eigenvalues related to velocities
 %       - uavCovarianceMatrixPosToTransEVCI: Coefficients matrix related to positions to be transmitted
 %       - uavCovarianceMatrixVelToTransEVCI: Voefficients matrix related to positions to be transmitted
+%       - uavPosReductionThreshold: 
+%       - uavVelReductionThreshold: 
 %       - uavEstimationModel: Variable telling which estimation model is utilized P or PV
 %       - uavVelocityOffset: Variable specifying the number of coordinates in the state vector before the velocity components
 %
@@ -91,6 +93,7 @@
 %   - prepareDataToBeSentEVCI: Function which conducts PCA compression and prepares data to be sent to another nodes
 %   - collectNeighborsData: Collects state and covariance data from the UAV's neighbors
 %   - pcaCompression: Performs PCA-based data compression on the covariance matrix
+%   - determineReductionThreshold: Determinines reduction threshold in the EVCI algorithm (under development)
 %   - reconstructCovarianceMatrix: Reconstructs the covariance matrix from received PCA-compressed data
 %
 % Mesh Update:
@@ -163,9 +166,11 @@ classdef Drone < handle
         uavEigenvaluesVelToTransEVCI  %Vector of significant eigenvalues related to velocities
         uavCovarianceMatrixPosToTransEVCI    %Coefficients matrix related to positions to be transmitted
         uavCovarianceMatrixVelToTransEVCI   % Coefficients matrix related to positions to be transmitted
+        uavPosReductionThreshold    % EVCI positions reduction threshold  
+        uavVelReductionThreshold    % EVCI velocities reduction threshold
         uavEstimationModel      % Variable telling which estimation model is utilized P or PV
         uavVelocityOffset       % Variable specifying the number of coordinates in the
-        % state vector before the velocity components
+                                % state vector before the velocity components
 
         % Logging Variables
         evciReductionMetrics % Cell array storing the number of significant components during EVCI
@@ -609,6 +614,9 @@ classdef Drone < handle
                         self.pcaCompression(stateVectorVelocities,covarianceMatrixVelocities,...
                         self.swarm.swarmParameters.evciVelReductionThreshold,"Velocitites");
 
+                    disp(self.uavEigenvaluesPosToTransEVCI);
+                    disp(self.uavEigenvaluesVelToTransEVCI);
+
                     % Log the data reduction metrics for this step
                     self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPosToTransEVCI) +...
                         length(self.uavEigenvaluesVelToTransEVCI);
@@ -775,6 +783,7 @@ classdef Drone < handle
             % Ensure that covariance matrix is semi
             covarianceMatrix = nearestSPD(covarianceMatrixToDecompose);
 
+            disp(stateVectorPart);
             % Print the eigenvalues for debugging
             [eigenvectors,eigenvalues] = eig(covarianceMatrix,'vector');
             disp('Eigenvalues before PCA:');
@@ -782,15 +791,22 @@ classdef Drone < handle
 
             % Perform PCA on the covariance matrix
             [pcaCoefficients,pcaEigenvalues,pcaExplained] = pcacov(covarianceMatrix);
+            
+            self.determineReductionThreshold();
+            % Determine the number of components to reject
+            % numRejected = size(pcaExplained)/2;
+            % numRejected = sum(pcaEigenvalues > self.uavPosReductionThreshold);
 
             if strcmp(stateVectorPart,"Positions")
                 % Plot uncertainty ellipsoids
-                plotEllipsoids(self,stateVectorHalf,eigenvectors,eigenvalues)
-            end
+                % plotEllipsoids(self,stateVectorHalf,eigenvectors,eigenvalues)
+                % numRejected = sum(pcaEigenvalues > self.uavPosReductionThreshold);
+                numRejected = size(pcaExplained)/2;
 
-            % Determine the number of components to reject
-            numRejected = size(pcaExplained)/2;
-            % numRejected = sum(pcaEigenvalues > reductionThreshold);
+            else
+                % numRejected = sum(pcaEigenvalues > self.uavVelReductionThreshold);
+                numRejected = size(pcaExplained);
+            end
 
             % Select the significant components
             significantComponents = pcaCoefficients(:,(1+numRejected):size(pcaCoefficients,2));
@@ -798,6 +814,17 @@ classdef Drone < handle
 
             % Prepare the matrix to be transmitted
             transmittedMatrix = significantComponents * sqrt(diag(significantEigenvalues));
+        end
+
+        %% Function resposnible for determining reduction threshold in the EVCI algorithm (under development)
+        % Output: uavPosReductionThreshold, uavVelReductionThreshold
+        function determineReductionThreshold(self)
+            self.uavPosReductionThreshold =  max(sqrt(self.uwbMeasurements));
+            disp(self.uavPosReductionThreshold);
+
+            stateVectorVelocities = self.uavStateVectorEVCI(self.uavVelocityOffset+1:end);
+            self.uavVelReductionThreshold = max(stateVectorVelocities);
+            disp(self.uavVelReductionThreshold);
         end
 
         %% Reconstruct the covariance matrix from received data
