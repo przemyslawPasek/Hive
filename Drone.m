@@ -648,7 +648,7 @@ classdef Drone < handle
                 end
 
                 % Apply Covariance Intersection
-                [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData);
+                [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData,'CI');
             end
         end
 
@@ -662,23 +662,23 @@ classdef Drone < handle
             if ~isempty(neighborIndices)
                 swarmWeights = self.swarm.swarmMetropolisWeights{self.uavIndex};
 
-                % Initialize cell arrays to store states and covariances
-                neighborsData.stateVectors = cell(1, length(neighborIndices) + 1);
-                neighborsData.covarianceMatrices = cell(1, length(neighborIndices) + 1);
-                neighborsData.weights = cell(1, length(neighborIndices) + 1);
+                switch self.uavEstimationModel
+                    case 'P'
+                        % Initialize cell arrays to store states and covariances
+                        neighborsData.stateVectors = cell(1, length(neighborIndices) + 1);
+                        neighborsData.covarianceMatrices = cell(1, length(neighborIndices) + 1);
+                        neighborsData.weights = cell(1, length(neighborIndices) + 1);
 
-                % Add the state and covariance of the UAV itself
-                neighborsData.stateVectors{self.uavIndex} = self.uavStateVectorEVCI;
-                neighborsData.covarianceMatrices{self.uavIndex} = self.uavCovarianceMatrixEVCI;
-                neighborsData.weights{self.uavIndex} = swarmWeights(self.uavIndex);
+                        % Add the state and covariance of the UAV itself
+                        neighborsData.stateVectors{self.uavIndex} = self.uavStateVectorEVCI;
+                        neighborsData.covarianceMatrices{self.uavIndex} = self.uavCovarianceMatrixEVCI;
+                        neighborsData.weights{self.uavIndex} = swarmWeights(self.uavIndex);
 
-                for neighborIndex = neighborIndices
-                    % Get the neighbor UAV's data (simulated as received data)
-                    neighborDrone = self.swarm.UAVs(neighborIndex); % Access the neighbor UAV
-                    dataToBeFused = true;
+                        for neighborIndex = neighborIndices
+                            % Get the neighbor UAV's data (simulated as received data)
+                            neighborDrone = self.swarm.UAVs(neighborIndex); % Access the neighbor UAV
+                            dataToBeFused = true;
 
-                    switch self.uavEstimationModel
-                        case 'P'
                             % Simulate transmission and reception
                             receivedMatrixPositions = neighborDrone.uavCovarianceMatrixPosToTransEVCI;
 
@@ -690,7 +690,29 @@ classdef Drone < handle
                                 neighborsData.covarianceMatrices{neighborIndex} = PapproxNeighbor;
                                 neighborsData.weights{neighborIndex} = swarmWeights(neighborIndex);
                             end
-                        case 'PV'
+                        end
+                    case 'PV'
+                        % Initialize cell arrays to store states and covariances
+                        neighborsData.stateVectors = cell(1, length(neighborIndices) + 1);
+                        neighborsData.covarianceMatrices = cell(1, length(neighborIndices) + 1);
+                        neighborsData.covarianceMatricesPos = cell(1, length(neighborIndices) + 1);
+                        neighborsData.covarianceMatricesVel = cell(1, length(neighborIndices) + 1);
+                        neighborsData.weights = cell(1, length(neighborIndices) + 1);
+
+                        % Add the state and covariance of the UAV itself
+                        neighborsData.stateVectors{self.uavIndex} = self.uavStateVectorEVCI;
+                        neighborsData.covarianceMatrices{self.uavIndex} = self.uavCovarianceMatrixEVCI;
+                        neighborsData.covarianceMatricesPos{self.uavIndex} = ...
+                            self.uavCovarianceMatrixEVCI(1:self.uavVelocityOffset,1:self.uavVelocityOffset);
+                        neighborsData.covarianceMatricesVel{self.uavIndex} = ...
+                            self.uavCovarianceMatrixEVCI(self.uavVelocityOffset+1:end,self.uavVelocityOffset+1:end);
+                        neighborsData.weights{self.uavIndex} = swarmWeights(self.uavIndex);
+
+                        for neighborIndex = neighborIndices
+                            % Get the neighbor UAV's data (simulated as received data)
+                            neighborDrone = self.swarm.UAVs(neighborIndex); % Access the neighbor UAV
+                            dataToBeFused = true;
+                            
                             % Simulate transmission and reception
                             receivedMatrixPositions = neighborDrone.uavCovarianceMatrixPosToTransEVCI;
                             receivedMatrixVelocities = neighborDrone.uavCovarianceMatrixVelToTransEVCI;
@@ -703,16 +725,18 @@ classdef Drone < handle
                             PapproxNeighborVelocities = self.reconstructCovarianceMatrix(receivedMatrixVelocities, numDiscardedComponentsVelocities);
 
                             PapproxNeighbor = [PapproxNeighborPositions zeros(self.uavVelocityOffset); zeros(self.uavVelocityOffset) PapproxNeighborVelocities];
-                            if ~isempty(PapproxNeighbor)
+                            if ~isempty(PapproxNeighborPositions)
                                 neighborsData.stateVectors{neighborIndex} = self.swarm.UAVs(neighborIndex).uavStateVectorEVCI;
                                 neighborsData.covarianceMatrices{neighborIndex} = PapproxNeighbor;
+                                neighborsData.covarianceMatricesPos{neighborIndex} = PapproxNeighborPositions;
+                                neighborsData.covarianceMatricesVel{neighborIndex} = PapproxNeighborVelocities;
                                 neighborsData.weights{neighborIndex} = swarmWeights(neighborIndex);
                             end
-                    end
+                        end
                 end
                 % Perform Covariance Intersection or other fusion with valid data
                 if dataToBeFused == true
-                    [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData);
+                    [fusedState, fusedCovariance] = self.covarianceIntersection(neighborsData,'EVCI');
                 end
             end
         end
@@ -720,28 +744,54 @@ classdef Drone < handle
         %% Funtion which applies Covariance Intersection to fuse multiple state estimates
         %  Input: neighborsData - struct with fields 'states' and 'covariances' from neighboring UAVs
         %  Output: fusedState, fusedCovraiance
-        function [fusedState, fusedCovariance] = covarianceIntersection(self, neighborsData)
+        function [fusedState, fusedCovariance] = covarianceIntersection(self, neighborsData, fusionAlgorithm)
 
             neighborIndices = self.swarm.swarmInnerConnections{self.uavIndex};
             dronesToBeFused = [self.uavIndex neighborIndices];
 
             % Initial fused state and covariance
             fusedState = zeros(size(neighborsData.stateVectors{self.uavIndex}));
-            fusedCovariance = zeros(size(neighborsData.covarianceMatrices{self.uavIndex}));
+            fusedCovariance = zeros(length(neighborsData.stateVectors{self.uavIndex}));
 
-            % Initialize temporary fusion variables
-            fusedCovInv = zeros(size(fusedCovariance));
+            if strcmp(fusionAlgorithm,'CI') || strcmp(self.uavEstimationModel,'P')
 
-            for fusedDroneIndex = dronesToBeFused
-                fusedCovInv = fusedCovInv + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatrices{fusedDroneIndex}^(-1);
+                % Initialize temporary fusion variables
+                fusedCovInv = zeros(size(fusedCovariance));
+
+                for fusedDroneIndex = dronesToBeFused
+                    fusedCovInv = fusedCovInv + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatrices{fusedDroneIndex}^(-1);
+                end
+                % Invert to get the fused covariance matrix
+                fusedCovariance = inv(fusedCovInv);
+
+                for fusedDroneIndex = dronesToBeFused
+                    fusedState =  fusedState + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatrices{fusedDroneIndex}^(-1) * neighborsData.stateVectors{fusedDroneIndex};
+                end
+                fusedState = fusedCovariance * fusedState;
+
+            elseif strcmp(fusionAlgorithm,'EVCI') && strcmp(self.uavEstimationModel,'PV')
+
+                % Initialize temporary fusion variables
+                    fusedCovPos = zeros(size(neighborsData.covarianceMatricesPos{self.uavIndex}));
+                    fusedCovVel = zeros(size(neighborsData.covarianceMatricesVel{self.uavIndex}));
+                    fusedCovInvPos = zeros(size(fusedCovPos));
+                    fusedCovInvVel = zeros(size(fusedCovVel));
+
+                    for fusedDroneIndex = dronesToBeFused
+                        fusedCovInvPos = fusedCovInvPos + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatricesPos{fusedDroneIndex}^(-1);
+                        fusedCovInvVel = fusedCovInvVel + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatricesVel{fusedDroneIndex}^(-1);
+                    end
+                    % Invert to get the fused covariance matrix
+                    fusedCovPos = inv(fusedCovInvPos);
+                    fusedCovVel = inv(fusedCovInvVel);
+
+                    fusedCovariance = [fusedCovPos zeros(self.uavVelocityOffset); zeros(self.uavVelocityOffset) fusedCovVel];
+
+                    for fusedDroneIndex = dronesToBeFused
+                        fusedState =  fusedState + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatrices{fusedDroneIndex}^(-1) * neighborsData.stateVectors{fusedDroneIndex};
+                    end
+                    fusedState = fusedCovariance * fusedState;
             end
-            % Invert to get the fused covariance matrix
-            fusedCovariance = inv(fusedCovInv);
-
-            for fusedDroneIndex = dronesToBeFused
-                fusedState =  fusedState + neighborsData.weights{fusedDroneIndex} * neighborsData.covarianceMatrices{fusedDroneIndex}^(-1) * neighborsData.stateVectors{fusedDroneIndex};
-            end
-            fusedState = fusedCovariance * fusedState;
         end
 
         %% Funtion which gathers the states and covariances from the neighbors
