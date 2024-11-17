@@ -590,8 +590,8 @@ classdef Drone < handle
                 case 'P'
                     % Compress data
                     [self.uavCovarianceMatrixPosToTransEVCI, self.uavEigenvaluesPosToTransEVCI] = ...
-                        self.pcaCompression(self.uavCovarianceMatrixEVCI,self.swarm.swarmParameters.evciPosReductionThreshold);
-
+                        self.pcaCompression(self.uavCovarianceMatrixEVCI,self.uavCovarianceMatrixEVCI,...
+                        self.swarm.swarmParameters.evciPosReductionThreshold,"Positions");
                     % Log the data reduction metrics for this step
                     self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPosToTransEVCI);
                 case 'PV'
@@ -613,9 +613,6 @@ classdef Drone < handle
                     [self.uavCovarianceMatrixVelToTransEVCI, self.uavEigenvaluesVelToTransEVCI] = ...
                         self.pcaCompression(stateVectorVelocities,covarianceMatrixVelocities,...
                         self.swarm.swarmParameters.evciVelReductionThreshold,"Velocitites");
-
-                    disp(self.uavEigenvaluesPosToTransEVCI);
-                    disp(self.uavEigenvaluesVelToTransEVCI);
 
                     % Log the data reduction metrics for this step
                     self.evciReductionMetrics{end+1} = length(self.uavEigenvaluesPosToTransEVCI) +...
@@ -683,10 +680,10 @@ classdef Drone < handle
                     switch self.uavEstimationModel
                         case 'P'
                             % Simulate transmission and reception
-                            receivedMatrixPositions = self.uavCovarianceMatrixPosToTransEVCI;
+                            receivedMatrixPositions = neighborDrone.uavCovarianceMatrixPosToTransEVCI;
 
                             % Reconstruct or directly use received data
-                            numDiscardedComponents = length(self.uavStateVector)-length(transmittedEigenvalues);
+                            numDiscardedComponents = length(self.uavStateVector)-length(neighborDrone.uavEigenvaluesPosToTransEVCI);
                             PapproxNeighbor = self.reconstructCovarianceMatrix(receivedMatrixPositions, numDiscardedComponents);
                             if ~isempty(PapproxNeighbor)
                                 neighborsData.stateVectors{neighborIndex} = self.swarm.UAVs(neighborIndex).uavStateVectorEVCI;
@@ -786,9 +783,8 @@ classdef Drone < handle
             disp(stateVectorPart);
             % Print the eigenvalues for debugging
             [eigenvectors,eigenvalues] = eig(covarianceMatrix,'vector');
-            disp('Eigenvalues before PCA:');
-            disp(eigenvalues);
-
+            % disp('Eigenvalues before PCA:');
+            % disp(eigenvalues);
             % Perform PCA on the covariance matrix
             [pcaCoefficients,pcaEigenvalues,pcaExplained] = pcacov(covarianceMatrix);
             
@@ -800,12 +796,13 @@ classdef Drone < handle
             if strcmp(stateVectorPart,"Positions")
                 % Plot uncertainty ellipsoids
                 % plotEllipsoids(self,stateVectorHalf,eigenvectors,eigenvalues)
+                % self.plot_eigenstructure(pcaCoefficients,pcaEigenvalues)
+                % self.plot_eigenvectors(pcaCoefficients,pcaEigenvalues)
                 % numRejected = sum(pcaEigenvalues > self.uavPosReductionThreshold);
-                numRejected = size(pcaExplained)/2;
-
+                numRejected = 0;
             else
                 % numRejected = sum(pcaEigenvalues > self.uavVelReductionThreshold);
-                numRejected = size(pcaExplained);
+                numRejected = 0;
             end
 
             % Select the significant components
@@ -820,11 +817,9 @@ classdef Drone < handle
         % Output: uavPosReductionThreshold, uavVelReductionThreshold
         function determineReductionThreshold(self)
             self.uavPosReductionThreshold =  max(sqrt(self.uwbMeasurements));
-            disp(self.uavPosReductionThreshold);
 
             stateVectorVelocities = self.uavStateVectorEVCI(self.uavVelocityOffset+1:end);
             self.uavVelReductionThreshold = max(stateVectorVelocities);
-            disp(self.uavVelReductionThreshold);
         end
 
         %% Reconstruct the covariance matrix from received data
@@ -896,6 +891,148 @@ classdef Drone < handle
             ylabel('Y');
             zlabel('Z');
             title('UAV Swarm with Uncertainty Ellipsoids');
+        end
+
+        function plot_eigenstructure(~,eigenvectors, eigenvalues)
+            % Error checking
+            if size(eigenvectors, 1) ~= size(eigenvectors, 2)
+                error('Eigenvectors matrix must be square');
+            end
+            if length(eigenvalues) ~= size(eigenvectors, 1)
+                error('Length of eigenvalues must match size of eigenvectors matrix');
+            end
+            if mod(length(eigenvalues), 3) ~= 0
+                error('Length of eigenvalues must be a multiple of 3');
+            end
+
+            % Create new figure
+            figure;
+
+            % Number of sets of 3D vectors
+            num_sets = length(eigenvalues) / 3;
+
+            % Define colors for different sets
+            colors = hsv(num_sets); % Different color for each set
+
+            % Plot origin
+            plot3(0, 0, 0, 'k.', 'MarkerSize', 20);
+            hold on;
+
+            % For each set of 3 eigenvectors
+            for i = 1:num_sets
+                % Extract current set of eigenvectors and eigenvalues
+                idx = (i-1)*3 + 1 : i*3;
+                current_evecs = eigenvectors(idx, idx);
+                current_evals = eigenvalues(idx);
+
+                % Sort eigenvalues and eigenvectors by eigenvalue magnitude
+                [sorted_evals, sort_idx] = sort(abs(current_evals), 'descend');
+                sorted_evecs = current_evecs(:, sort_idx);
+
+                % Plot each eigenvector scaled by its eigenvalue
+                for j = 1:3
+                    % Scale eigenvector by square root of eigenvalue for better visualization
+                    scaled_evec = sorted_evecs(:,j) * sqrt(abs(sorted_evals(j)));
+
+                    % Plot vector
+                    quiver3(0, 0, 0, ...
+                        scaled_evec(1), scaled_evec(2), scaled_evec(3), ...
+                        0, ... % no automatic scaling
+                        'Color', colors(i,:), ...
+                        'LineWidth', 2, ...
+                        'MaxHeadSize', 0.5);
+
+                    % Add text label with eigenvalue
+                    text(scaled_evec(1), scaled_evec(2), scaled_evec(3), ...
+                        sprintf('λ_{%d,%d}=%.2f', i, j, sorted_evals(j)), ...
+                        'Color', colors(i,:));
+                end
+
+                % Plot coordinate plane projections (optional)
+                % XY plane
+                plot3([sorted_evecs(1,1), sorted_evecs(1,2)], ...
+                    [sorted_evecs(2,1), sorted_evecs(2,2)], ...
+                    [0, 0], '--', 'Color', colors(i,:));
+                % XZ plane
+                plot3([sorted_evecs(1,1), sorted_evecs(1,3)], ...
+                    [0, 0], ...
+                    [sorted_evecs(3,1), sorted_evecs(3,3)], '--', 'Color', colors(i,:));
+                % YZ plane
+                plot3([0, 0], ...
+                    [sorted_evecs(2,2), sorted_evecs(2,3)], ...
+                    [sorted_evecs(3,2), sorted_evecs(3,3)], '--', 'Color', colors(i,:));
+            end
+
+            % Set plot properties
+            grid on;
+            axis equal;
+            xlabel('X');
+            ylabel('Y');
+            zlabel('Z');
+            title('Eigenvectors Scaled by Eigenvalues');
+
+            % Add legend
+            legend_entries = cell(num_sets, 1);
+            for i = 1:num_sets
+                legend_entries{i} = sprintf('Set %d', i);
+            end
+            legend(legend_entries);
+
+            % Set view angle for better 3D visualization
+            view(45, 30);
+
+            % Make axis lines thicker
+            set(gca, 'LineWidth', 1.5);
+        end
+
+        function plot_eigenvectors(~,eigenvectors, eigenvalues)
+            % PLOT_EIGENVECTORS Visualizes the eigenvectors and eigenvalues in a 3D plot.
+            %
+            % Parameters:
+            %   eigenvectors - A matrix of eigenvectors (NxN).
+            %   eigenvalues  - A vector of eigenvalues (Nx1).
+            %
+            % The eigenvectors are plotted from the same origin with their length scaled
+            % by the corresponding eigenvalue.
+
+            % Check dimensions
+            [num_dims, num_vectors] = size(eigenvectors);
+            if num_dims ~= num_vectors || length(eigenvalues) ~= num_dims
+                error('Eigenvector matrix must be NxN and eigenvalues must be Nx1.');
+            end
+
+            % Create figure
+            figure;
+            hold on;
+            grid on;
+
+            % Plot the origin point
+            origin = zeros(1, num_dims);
+
+            % Loop through each eigenvector
+            for i = 1:num_dims
+                % Scale the eigenvector by the corresponding eigenvalue
+                scaled_vector = eigenvectors(:, i) * sqrt(eigenvalues(i));
+
+                % Plot the eigenvector as an arrow
+                quiver3(origin(1), origin(2), origin(3), scaled_vector(1), scaled_vector(2), scaled_vector(3), ...
+                    'LineWidth', 2, 'MaxHeadSize', 0.5, 'AutoScale', 'off');
+            end
+
+            % Set plot labels and title
+            xlabel('X');
+            ylabel('Y');
+            zlabel('Z');
+            title('Eigenvectors and Eigenvalues Visualization');
+
+            % Set axes limits for better visualization
+            max_eigenval = max(sqrt(eigenvalues));
+            axis([-max_eigenval max_eigenval -max_eigenval max_eigenval -max_eigenval max_eigenval]);
+
+            % Set the view to 3D for better interpretation
+            view(3);
+
+            hold off;
         end
     end
 end

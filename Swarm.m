@@ -148,7 +148,7 @@ classdef Swarm < handle
 
             self.swarmParameters.nbAgents = self.swarmNbAgents;
             self.swarmParameters.estimationModel = 'PV';
-            self.swarmParameters.maxRange = 10;
+            self.swarmParameters.maxRange = 100;
             self.swarmParameters.evciPosReductionThreshold = 1000;
             self.swarmParameters.evciVelReductionThreshold = 10;
             self.swarmParameters.noisePresence = 0;
@@ -170,7 +170,7 @@ classdef Swarm < handle
             % Determine initial neighbors' connections
             self.determineInnerConnections();
 
-            self.analyzeSwarmDensity();
+            % self.analyzeSwarmDensity();
 
             % Update simulation time
             self.simTimeStep = self.swarmSimulationScene.CurrentTime;
@@ -370,32 +370,42 @@ classdef Swarm < handle
 
         %% Data fusion with UAVs around - collects data from nieghbors and fuse using CI
         function fuseWithNeighborsCI(self)
+            fusedState = cell(1, self.swarmNbAgents);
+            fusedCovariance = cell(1, self.swarmNbAgents);
+
             for uavIndex = 1:self.swarmNbAgents
                 if ~isempty(self.swarmInnerConnections{uavIndex})
-                    [fusedState, fusedCovariance] = self.UAVs(uavIndex).fuseWithNeighborsCI();
+                    [fusedState{uavIndex}, fusedCovariance{uavIndex}] = self.UAVs(uavIndex).fuseWithNeighborsCI();
                 end
             end
             for uavIndex = 1:self.swarmNbAgents
                 if ~isempty(self.swarmInnerConnections{uavIndex})
-                    self.UAVs(uavIndex).uavStateVectorCI = fusedState;
-                    self.UAVs(uavIndex).uavCovarianceMatrixCI = fusedCovariance;
+                    self.UAVs(uavIndex).uavStateVectorCI = fusedState{uavIndex};
+                    self.UAVs(uavIndex).uavCovarianceMatrixCI = fusedCovariance{uavIndex};
                 end
+                disp(uavIndex)
+                disp(trace(self.UAVs(uavIndex).uavCovarianceMatrixCI))
             end
         end
 
         %% Data fusion with UAVs around - collects data from nieghbors using
         %  eigenvalue decomposition and data reduction, then fuse using CI
         function fuseWithNeighborsEVCI(self)
+            fusedState = cell(1, self.swarmNbAgents);
+            fusedCovariance = cell(1, self.swarmNbAgents);
+
             for uavIndex = 1:self.swarmNbAgents
                 if ~isempty(self.swarmInnerConnections{uavIndex})
-                    [fusedState, fusedCovariance] = self.UAVs(uavIndex).fuseWithNeighborsEVCI();
+                    [fusedState{uavIndex}, fusedCovariance{uavIndex}] = self.UAVs(uavIndex).fuseWithNeighborsEVCI();
                 end
             end
             for uavIndex = 1:self.swarmNbAgents
                 if ~isempty(self.swarmInnerConnections{uavIndex})
-                    self.UAVs(uavIndex).uavStateVectorEVCI = fusedState;
-                    self.UAVs(uavIndex).uavCovarianceMatrixEVCI = fusedCovariance;
+                    self.UAVs(uavIndex).uavStateVectorEVCI = fusedState{uavIndex};
+                    self.UAVs(uavIndex).uavCovarianceMatrixEVCI = fusedCovariance{uavIndex};
                 end
+            disp(uavIndex)
+            disp(trace(self.UAVs(uavIndex).uavCovarianceMatrixEVCI))
             end
         end
 
@@ -642,6 +652,7 @@ classdef Swarm < handle
 
             % Initialize figure
             figure;
+            set(gcf,'color','w')
             hold on;
 
             % Iterate over each UAV to plot their trajectories
