@@ -63,6 +63,7 @@
 %   - plotRPE: Plots RPE comparison of different estimation methods over time.
 %   - plotNIS: Plots NIS comparison of different estimation methods over time.
 %   - plotSwarmEstimations: Plots estimated positions of all UAVs from the perspective of a specific UAV.
+%   - plotCovarianceDifferences: Plots CI and EVCI covariance matrix differences for a specific UAV.
 %
 % Note:
 % -----
@@ -404,25 +405,25 @@ classdef Swarm < handle
                     self.UAVs(uavIndex).uavStateVectorEVCI = fusedState{uavIndex};
                     self.UAVs(uavIndex).uavCovarianceMatrixEVCI = fusedCovariance{uavIndex};
                 end
-            disp(uavIndex)
-            disp(trace(self.UAVs(uavIndex).uavCovarianceMatrixEVCI))
+                disp(uavIndex)
+                disp(trace(self.UAVs(uavIndex).uavCovarianceMatrixEVCI))
             end
         end
 
         %% Function which provides metrics related to UAV swarm regarding its density
         % Output: swarmDensityProperties - structure with swarm metrics
         function analyzeSwarmDensity(self)
-                        
+
             % Calculate pairwise distances
-           positions = reshape(self.swarmTruePositions, [3, self.swarmNbAgents])';
-           distMatrix = pdist2(positions,positions);
+            positions = reshape(self.swarmTruePositions, [3, self.swarmNbAgents])';
+            distMatrix = pdist2(positions,positions);
 
-           % Create adjacency matrix
-           adjMatrix = distMatrix <= self.swarmParameters.maxRange;
-           adjMatrix = adjMatrix - diag(diag(adjMatrix));  % Remove self-connections
+            % Create adjacency matrix
+            adjMatrix = distMatrix <= self.swarmParameters.maxRange;
+            adjMatrix = adjMatrix - diag(diag(adjMatrix));  % Remove self-connections
 
-           % Average distance between all nodes
-           avgDistance = mean(distMatrix(triu(true(self.swarmNbAgents), 1)));
+            % Average distance between all nodes
+            avgDistance = mean(distMatrix(triu(true(self.swarmNbAgents), 1)));
 
             % Create graph
             G = graph();
@@ -688,6 +689,41 @@ classdef Swarm < handle
             zlabel('Z Position (meters)');
             title(['Swarm Position Estimations from UAV ' num2str(uavIndex)]);
             legend('show');
+            grid on;
+            axis equal;
+            hold off;
+        end
+
+        %% Method to plot CI and EVCI covariance matrix differences for a specific UAV
+        function plotCovarianceDifferences(self, uavIndex)
+            if uavIndex < 1 || uavIndex > self.swarmNbAgents
+                error('Invalid UAV index. Must be between 1 and %d.', self.swarmNbAgents);
+            end
+
+            % Initialize figure
+            figure;
+            set(gcf,'color','w')
+            hold on;
+
+            estimatedCovarianceCI = self.UAVs(uavIndex).uavCovarianceMatrixCI;
+            estimatedCovarianceEVCI = self.UAVs(uavIndex).uavCovarianceMatrixEVCI;
+
+            covaraianceDifference =  estimatedCovarianceEVCI - estimatedCovarianceCI;
+            
+            % Get the maximum value and its indices
+            [value, linearIndex] = max(abs(covaraianceDifference(:)));
+            [row, col] = ind2sub(size(covaraianceDifference), linearIndex);
+
+            disp(['Maximum Value: ', num2str(value)]);
+            disp(['Row: ', num2str(row), ', Column: ', num2str(col)]);
+
+            imagesc(covaraianceDifference)
+            colorbar
+
+            % Set plot properties
+            xlabel('States')
+            ylabel('States')
+            title(['Full Difference Matrix for UAV: ' num2str(uavIndex)]);
             grid on;
             axis equal;
             hold off;

@@ -98,6 +98,7 @@ end
 Swarm.calculateMetrics();  % Calculate metrics related to the swarm's performance, such as accuracy and efficiency
 Swarm.plotRMSE();  % Plot the Root Mean Squared Error (RMSE) metrics to evaluate estimation accuracy
 Swarm.plotSwarmEstimations(1);  % Plot the swarm estimations for the specified UAV index (3 in this case)
+Swarm.plotCovarianceDifferences(1);
 
 % End of Script
 % =============
