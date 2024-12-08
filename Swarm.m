@@ -64,6 +64,7 @@
 %   - plotNIS: Plots NIS comparison of different estimation methods over time.
 %   - plotSwarmEstimations: Plots estimated positions of all UAVs from the perspective of a specific UAV.
 %   - plotCovarianceDifferences: Plots CI and EVCI covariance matrix differences for a specific UAV.
+%   - plotDataReduction: Method to plot data reduction metrics
 %
 % Note:
 % -----
@@ -528,11 +529,13 @@ classdef Swarm < handle
         function calculateMetrics(self)
             for uavIndex = 1:self.swarmNbAgents
 
+                uavVelocityOffset = self.swarmParameters.nbAgents * 3;
+
                 % Extract true and estimated states
-                trueState = self.simLoggedData(uavIndex).trueState;
-                estimatedState = self.simLoggedData(uavIndex).estimatedState;
-                estimatedStateCI = self.simLoggedData(uavIndex).estimatedStateCI;
-                estimatedStateEVCI = self.simLoggedData(uavIndex).estimatedStateEVCI;
+                trueState = self.simLoggedData(uavIndex).trueState(1:uavVelocityOffset,:);
+                estimatedState = self.simLoggedData(uavIndex).estimatedState(1:uavVelocityOffset,:);
+                estimatedStateCI = self.simLoggedData(uavIndex).estimatedStateCI(1:uavVelocityOffset,:);
+                estimatedStateEVCI = self.simLoggedData(uavIndex).estimatedStateEVCI(1:uavVelocityOffset,:);
 
                 % Calculate RMSE for each method
                 self.simProcessedData(uavIndex).rmseEKF = sqrt(mean((trueState - estimatedState).^2, 1));
@@ -558,20 +561,20 @@ classdef Swarm < handle
                     end
                 end
 
-                % Calculate NIS for each method
-                for t = 1:self.simTimeStep
-                    P_EKF = self.simLoggedData(uavIndex).estimatedCovariance(:, :, t);
-                    P_CI = self.simLoggedData(uavIndex).estimatedCovarianceCI(:, :, t);
-                    P_EVCI = self.simLoggedData(uavIndex).estimatedCovarianceEVCI(:, :, t);
-
-                    innovationEKF = trueState(:, t) - estimatedState(:, t);
-                    innovationCI = trueState(:, t) - estimatedStateCI(:, t);
-                    innovationEVCI = trueState(:, t) - estimatedStateEVCI(:, t);
-
-                    self.simProcessedData(uavIndex).nisEKF(t) = innovationEKF' / P_EKF * innovationEKF;
-                    self.simProcessedData(uavIndex).nisCI(t) = innovationCI' / P_CI * innovationCI;
-                    self.simProcessedData(uavIndex).nisEVCI(t) = innovationEVCI' / P_EVCI * innovationEVCI;
-                end
+                % % Calculate NIS for each method
+                % for t = 1:self.simTimeStep
+                %     P_EKF = self.simLoggedData(uavIndex).estimatedCovariance(:, :, t);
+                %     P_CI = self.simLoggedData(uavIndex).estimatedCovarianceCI(:, :, t);
+                %     P_EVCI = self.simLoggedData(uavIndex).estimatedCovarianceEVCI(:, :, t);
+                % 
+                %     innovationEKF = trueState(:, t) - estimatedState(:, t);
+                %     innovationCI = trueState(:, t) - estimatedStateCI(:, t);
+                %     innovationEVCI = trueState(:, t) - estimatedStateEVCI(:, t);
+                % 
+                %     self.simProcessedData(uavIndex).nisEKF(t) = innovationEKF' / P_EKF * innovationEKF;
+                %     self.simProcessedData(uavIndex).nisCI(t) = innovationCI' / P_CI * innovationCI;
+                %     self.simProcessedData(uavIndex).nisEVCI(t) = innovationEVCI' / P_EVCI * innovationEVCI;
+                % end
             end
         end
 
@@ -581,16 +584,17 @@ classdef Swarm < handle
             set(gcf,'color','w')
             hold on;
             color = {[0.75 0.25 0.2]; [0.6 0.8 1]};
-            for uavIndex = 1:self.swarmNbAgents
+            uavIndex = 1;
+            % for uavIndex = 1:self.swarmNbAgents
                 % plot(self.processedData(uavIndex).rmseEKF, 'r', 'DisplayName', ['UAV ' num2str(uavIndex) ' EKF']);
                 plot(self.simProcessedData(uavIndex).rmseCI, 'DisplayName',...
                     ['UAV ' num2str(uavIndex) ' CI'],'Color',color{1}','LineWidth', 4);
                 plot(self.simProcessedData(uavIndex).rmseEVCI, 'DisplayName',...
                     ['UAV ' num2str(uavIndex) ' EVCI'],'Color',color{2},'LineWidth', 4);
-            end
-            xlabel('Time Step');
-            ylabel('RMSE');
-            title("RMSE Over Time ","FontSize",14);
+            % end
+            xlabel('Time Step','FontSize',12,'FontWeight','bold');
+            ylabel('RMSE of the UAV position [m]','FontSize',12,'FontWeight','bold');
+            title("RMSE OVER TIME","FontSize",14,'FontWeight','bold');
             % subtitle("Threshold: " + self.swarmParameters.evciReductionThreshold,...
             %     "FontWeight","normal" );
             legend('show');
@@ -668,7 +672,7 @@ classdef Swarm < handle
 
                 % Plot true positions
                 plot3(plotTruePositions(1, :), plotTruePositions(2, :), plotTruePositions(3, :), ...
-                    '-', 'DisplayName', ['True UAV ' num2str(agentIndex)], 'LineWidth', 1.5);
+                    '-', 'DisplayName', ['True UAV ' num2str(agentIndex)], 'LineWidth', 2);
 
                 % Plot EKF estimated positions
                 % plot3(estimatedPositionsEKF(1, :), estimatedPositionsEKF(2, :), estimatedPositionsEKF(3, :), ...
@@ -684,11 +688,12 @@ classdef Swarm < handle
             end
 
             % Set plot properties
-            xlabel('X Position (meters)');
-            ylabel('Y Position (meters)');
-            zlabel('Z Position (meters)');
-            title(['Swarm Position Estimations from UAV ' num2str(uavIndex)]);
-            legend('show');
+            view(-30,15)
+            xlabel('X Position (meters)','FontSize',12,'FontWeight','bold');
+            ylabel('Y Position (meters)','FontSize',12,'FontWeight','bold');
+            zlabel('Z Position (meters)','FontSize',12,'FontWeight','bold');
+            title(['SWARM POSITION ESTIMATIONS FROM UAV ' num2str(uavIndex)],'FontSize',14,'FontWeight','bold');
+            legend('show','Location','north','NumColumns',self.swarmNbAgents);
             grid on;
             axis equal;
             hold off;
@@ -709,7 +714,7 @@ classdef Swarm < handle
             estimatedCovarianceEVCI = self.UAVs(uavIndex).uavCovarianceMatrixEVCI;
 
             covaraianceDifference =  estimatedCovarianceEVCI - estimatedCovarianceCI;
-            
+
             % Get the maximum value and its indices
             [value, linearIndex] = max(abs(covaraianceDifference(:)));
             [row, col] = ind2sub(size(covaraianceDifference), linearIndex);
@@ -721,12 +726,77 @@ classdef Swarm < handle
             colorbar
 
             % Set plot properties
-            xlabel('States')
-            ylabel('States')
-            title(['Full Difference Matrix for UAV: ' num2str(uavIndex)]);
+            xlabel('States','FontSize',12,'FontWeight','bold')
+            ylabel('States','FontSize',12,'FontWeight','bold')
+            title(['DIFFERENCES BETWEEN COVARIANCE MARICES FOR UAV ' num2str(uavIndex)],'FontSize',14,'FontWeight','bold');
+            subtitle('EVCI COMPARED TO CI','FontSize',14);
             grid on;
-            axis equal;
+            axis off;
+            % axis([0 size(covaraianceDifference,1) 0 size(covaraianceDifference,2)])
             hold off;
+        end
+
+        %% Method to plot data reduction metrics
+        function plotDataReduction(self)
+
+            % Simulation parameters
+            K = self.swarmNbAgents;  % Number of UAVs
+            n = length(self.UAVs(1).uavStateVectorEVCI);   % Size of the state vector
+            numSteps = length(self.UAVs(1).evciReductionMetrics);  % Number of simulation steps
+            floatSize = 8;  % Size of a floating-point number in bytes (double precision)
+
+            % Calculate data transmitted
+            evciData = zeros(1, numSteps);
+            ciData = zeros(1, numSteps);
+
+            for step = 1:numSteps
+                evciReductionValues = cell2mat(self.UAVs(1, 1).evciReductionMetrics(step));
+
+                % Data per UAV
+                evciDataPerUav = n * floatSize + n/2 * evciReductionValues * floatSize;
+                ciDataPerUav = n * floatSize + n * n * floatSize;
+
+                % Total data for all UAVs
+                evciData(step) = K * evciDataPerUav;
+                ciData(step) = K * ciDataPerUav;
+            end
+
+            % Total data transmitted over all steps
+            totalEvciData = sum(evciData);
+            totalCiData = sum(ciData);
+
+            % % Bar chart for comparison
+            % figure;
+            % set(gcf,'color','w')
+            % bar(1:numSteps, [evciData' ciData'], 'grouped');
+            % xlabel('Simulation Step');
+            % ylabel('Data Transmitted (Bytes)');
+            % title('Comparison of Data Transmitted (EVCI vs CI)',"FontSize",14);
+            % legend('EVCI Algorithm', 'CI Algorithm');
+
+            % Pie chart for total data summary
+            figure;
+            set(gcf,'color','w')
+            totalData = [totalEvciData, totalCiData];
+            labels = {
+                sprintf('EVCI: %d B', totalEvciData), ...
+                sprintf('CI: %d B', totalCiData)
+                };            
+            p = pie(totalData,[1 0],labels);
+            % title('TOTAL DATA TRANSMITTED','FontSize',14,'FontWeight','bold');
+            p1 = p(2);
+            p2 = p(4);
+            p1.FontSize = 14;
+            p2.FontSize = 14;
+
+
+            % Table for comparison
+            data_table = table((1:numSteps)', evciData', ciData', ...
+                'VariableNames', {'Simulation_Step', 'EVCI_Data_Bytes', 'CI_Data_Bytes'});
+
+            disp('Comparison of Data Transmitted in Each Simulation Step:');
+            disp(data_table);
+
         end
     end
 end

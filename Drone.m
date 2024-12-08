@@ -799,10 +799,10 @@ classdef Drone < handle
                 % self.plot_eigenstructure(pcaCoefficients,pcaEigenvalues)
                 % self.plot_eigenvectors(pcaCoefficients,pcaEigenvalues)
                 % numRejected = sum(pcaEigenvalues > self.uavPosReductionThreshold);
-                numRejected = 0;
+                numRejected = 11;
             else
                 % numRejected = sum(pcaEigenvalues > self.uavVelReductionThreshold);
-                numRejected = 0;
+                numRejected = 1;
             end
 
             % Select the significant components
@@ -1034,6 +1034,8 @@ classdef Drone < handle
 
             hold off;
         end
+
+        
     end
 end
 

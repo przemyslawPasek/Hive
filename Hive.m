@@ -80,7 +80,7 @@ while advance(Swarm.swarmSimulationScene)  % Loop continues as long as the simul
     % -----------------
     % Visualizes the scenario in 3D, updating the figure window with the current states of all UAVs in the swarm.
     % 'Parent' specifies the parent axes for the visualization.
-    % show3D(Swarm.swarmSimulationScene, 'Parent', sceneAxes);  
+    % show3D(Swarm.swarmSimulationScene, 'Parent', sceneAxes);
     % drawnow limitrate;  % Efficiently updates the figure window with a limited refresh rate
 
     % Swarm Inner Connections:
@@ -99,6 +99,6 @@ Swarm.calculateMetrics();  % Calculate metrics related to the swarm's performanc
 Swarm.plotRMSE();  % Plot the Root Mean Squared Error (RMSE) metrics to evaluate estimation accuracy
 Swarm.plotSwarmEstimations(1);  % Plot the swarm estimations for the specified UAV index (3 in this case)
 Swarm.plotCovarianceDifferences(1);
-
+Swarm.plotDataReduction();
 % End of Script
 % =============
